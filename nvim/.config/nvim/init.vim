@@ -7,11 +7,17 @@ Plug 'vim-airline/vim-airline'
 Plug 'ctrlpvim/ctrlp.vim'
 Plug 'w0rp/ale'
 Plug 'sheerun/vim-polyglot'
+Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
+Plug 'pbogut/deoplete-elm'
+Plug 'slashmili/alchemist.vim'
 
 " Writing
 Plug 'junegunn/goyo.vim'
-
 call plug#end()
+
+" Config Packages
+let g:ale_completion_enabled = 1
+let g:deoplete#enable_at_startup = 1
 
 " Scott's Preferences
 nnoremap <SPACE> <Nop>
