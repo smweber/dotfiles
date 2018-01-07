@@ -1,11 +1,11 @@
-" Plug Package Management
+"---------- Plug Package Management ----------
 call plug#begin()
+" Change Behaviour
 Plug 'tpope/vim-sensible'
 Plug 'vim-airline/vim-airline'
 Plug 'Shougo/vimfiler.vim', { 'on': 'VimFiler' }
 Plug 'airblade/vim-gitgutter'
 Plug 'christoomey/vim-tmux-navigator'
-
 " Development
 Plug 'ctrlpvim/ctrlp.vim'
 Plug 'w0rp/ale'
@@ -13,18 +13,21 @@ Plug 'sheerun/vim-polyglot'
 Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
 Plug 'pbogut/deoplete-elm'
 Plug 'slashmili/alchemist.vim'
-
 " Writing
 Plug 'junegunn/goyo.vim'
 call plug#end()
 
-" Config Packages
+
+"---------- Config Packages ----------
 let g:ale_completion_enabled = 1
 let g:deoplete#enable_at_startup = 1
 map ` :VimFiler -explorer<CR>
 map ~ :VimFilerCurrentDir -explorer -find<CR>
+" Use tab to select autocomplete (from Deoplete currently)
+inoremap <expr> <Tab> pumvisible() ? "\<C-n>" : "\<Tab>"
 
-" Scott's Preferences
+
+" ---------- Scott's Preferences ----------
 nnoremap <SPACE> <Nop>
 let mapleader=' '
 nmap <Leader>nn :set invnumber<CR>
@@ -51,7 +54,7 @@ nnoremap <c-h> <c-w><c-h>
 nnoremap <c-l> <c-w><c-l>
 
 
-" Writing and Wrapping
+" ---------- Writing and Wrapping Functions -----------
 function! s:wrapIt()
     set wrap linebreak nolist
     nnoremap j gj
@@ -95,7 +98,7 @@ command! -nargs=* WrapIt :call s:wrapIt()
 command! -nargs=* UnWrapIt :call s:unWrapIt()
 
 
-" Trailing Whitespace Stripping
+" ---------- Trailing Whitespace Stripping ----------
 function! <SID>StripTrailingWhitespace()
     " Preparation: save last search, and cursor position.
     let _s=@/
