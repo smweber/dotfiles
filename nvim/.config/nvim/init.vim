@@ -2,6 +2,9 @@
 call plug#begin()
 Plug 'tpope/vim-sensible'
 Plug 'vim-airline/vim-airline'
+Plug 'Shougo/vimfiler.vim', { 'on': 'VimFiler' }
+Plug 'airblade/vim-gitgutter'
+Plug 'christoomey/vim-tmux-navigator'
 
 " Development
 Plug 'ctrlpvim/ctrlp.vim'
@@ -18,6 +21,8 @@ call plug#end()
 " Config Packages
 let g:ale_completion_enabled = 1
 let g:deoplete#enable_at_startup = 1
+map ` :VimFiler -explorer<CR>
+map ~ :VimFilerCurrentDir -explorer -find<CR>
 
 " Scott's Preferences
 nnoremap <SPACE> <Nop>
