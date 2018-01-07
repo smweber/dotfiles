@@ -1,0 +1,23 @@
+[color]
+    ui = true
+[format]
+    pretty = fuller
+[alias]
+    st          = status
+    co          = checkout
+    br          = branch
+    ff          = merge --ff-only
+    up          = remote update -p
+    branch-name = "!git rev-parse --abbrev-ref HEAD"
+    publish     = "!git push -u origin $(git branch-name)"
+    l           = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%ad) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative --branches --tags --remotes -n15
+    lb          = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%ad) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative
+    ll          = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%ad) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative --branches --tags --remotes
+    lz          = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%ad) %C(bold blue)<%an>%Creset' --abbrev-commit --branches --tags --remotes -n100 --author=Scott --committer=Scott --date=short
+    logfull     = log --pretty=fuller --graph --stat -p
+    lf          = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%ad) %C(bold blue)<%an>%Creset' --abbrev-commit --date=relative --all --full-history
+    reflogtree  = "!git lf `git reflog | cut -c1-7`"
+[push]
+    default = upstream
+[merge]
+    defaultToUpstream = true
