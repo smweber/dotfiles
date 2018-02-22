@@ -6,13 +6,19 @@ Plug 'vim-airline/vim-airline'
 Plug 'Shougo/vimfiler.vim', { 'on': 'VimFiler' }
 Plug 'airblade/vim-gitgutter'
 Plug 'christoomey/vim-tmux-navigator'
+
 " Development
 Plug 'ctrlpvim/ctrlp.vim'
 Plug 'w0rp/ale'
 Plug 'sheerun/vim-polyglot'
 Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
+" Elm
 Plug 'pbogut/deoplete-elm'
+" Elixir
 Plug 'slashmili/alchemist.vim'
+" Haskell
+Plug 'eagletmt/neco-ghc'
+
 " Writing
 Plug 'junegunn/goyo.vim'
 call plug#end()
@@ -25,6 +31,7 @@ map ` :VimFiler -explorer<CR>
 map ~ :VimFilerCurrentDir -explorer -find<CR>
 " Use tab to select autocomplete (from Deoplete currently)
 inoremap <expr> <Tab> pumvisible() ? "\<C-n>" : "\<Tab>"
+let g:necoghc_use_stack = 1
 
 
 " ---------- Scott's Preferences ----------
