@@ -7,6 +7,7 @@ Plug 'Shougo/vimfiler.vim', { 'on': 'VimFiler' }
 Plug 'airblade/vim-gitgutter'
 Plug 'christoomey/vim-tmux-navigator'
 Plug 'rakr/vim-one'
+Plug 'joshdick/onedark.vim'
 
 " Development
 Plug 'ctrlpvim/ctrlp.vim'
@@ -56,10 +57,10 @@ set splitright
 set number
 
 " Colourscheme
-set termguicolors
-colorscheme one
+"set termguicolors
+colorscheme onedark
 set background=dark
-let g:airline_theme='one'
+let g:airline_theme='onedark'
 
 " Tab and window movement
 nnoremap <c-k> <c-w><c-k>
