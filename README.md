@@ -4,10 +4,10 @@ Scott's Dotfiles
 To use, first install GNU Stow.
 
 Then:
- - `git clone smweber/dotfiles ~/.dotfiles`
+ - `git clone git@github.com:smweber/dotfiles.git ~/.dotfiles`
  - `cd ~/.dotfiles`
- - `stow sh`
- - `stow nvim`
+ - `stow --no-folding sh`
+ - `stow --no-folding nvim`
  - etc...
 
 For Neovim:
