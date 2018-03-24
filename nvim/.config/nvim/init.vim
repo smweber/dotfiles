@@ -6,6 +6,7 @@ Plug 'vim-airline/vim-airline'
 Plug 'Shougo/vimfiler.vim', { 'on': 'VimFiler' }
 Plug 'airblade/vim-gitgutter'
 Plug 'christoomey/vim-tmux-navigator'
+Plug 'rakr/vim-one'
 
 " Development
 Plug 'ctrlpvim/ctrlp.vim'
@@ -53,6 +54,12 @@ set backupdir=~/.tmp
 set splitbelow
 set splitright
 set number
+
+" Colourscheme
+set termguicolors
+colorscheme one
+set background=dark
+let g:airline_theme='one'
 
 " Tab and window movement
 nnoremap <c-k> <c-w><c-k>
