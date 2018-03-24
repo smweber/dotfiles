@@ -23,3 +23,4 @@ For tmux:
 For fish:
  - install fish (`brew` or `apt` will do)
  - install Oh My Fish: https://github.com/oh-my-fish/oh-my-fish
+ - may need a `omf install`
