@@ -16,6 +16,10 @@ For Neovim:
  - Then open nvim and type `:PlugInstall`
 
 For tmux:
- - tmux can be `sudo apt install tmux`ed
+ - install tmux (`brew` or `apt` will do)
  - needs Tmux Plugin Manager: https://github.com/tmux-plugins/tpm
  - Then a `Ctrl-a` + `I` should do it
+
+For fish:
+ - install fish (`brew` or `apt` will do)
+ - install Oh My Fish: https://github.com/oh-my-fish/oh-my-fish
