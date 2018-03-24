@@ -21,3 +21,5 @@
     default = upstream
 [merge]
     defaultToUpstream = true
+[include]
+    path = ~/.gitconfig.local
