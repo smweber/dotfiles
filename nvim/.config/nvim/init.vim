@@ -3,23 +3,29 @@ call plug#begin()
 " Change Behaviour
 Plug 'tpope/vim-sensible'
 Plug 'vim-airline/vim-airline'
-Plug 'Shougo/vimfiler.vim', { 'on': 'VimFiler' }
 Plug 'airblade/vim-gitgutter'
 Plug 'christoomey/vim-tmux-navigator'
+
+" Themes
 Plug 'rakr/vim-one'
 Plug 'joshdick/onedark.vim'
 
 " Development
-Plug 'ctrlpvim/ctrlp.vim'
-Plug 'w0rp/ale'
-Plug 'sheerun/vim-polyglot'
-Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' }
+Plug 'ctrlpvim/ctrlp.vim'   " File opening
+Plug 'w0rp/ale'             " Async linting
+Plug 'sheerun/vim-polyglot' " A collection of language packs
+Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' } " Async Completion
+Plug 'tpope/vim-sleuth'     " Heuristically set buffer options
+
 " Elm
 Plug 'pbogut/deoplete-elm'
 " Elixir
 Plug 'slashmili/alchemist.vim'
 " Haskell
 Plug 'eagletmt/neco-ghc'
+" Ruby/Rails
+Plug 'tpope/vim-rails'
+Plug 'vim-ruby/vim-ruby'
 
 " Writing
 Plug 'junegunn/goyo.vim'
