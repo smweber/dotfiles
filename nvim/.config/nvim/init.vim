@@ -5,6 +5,8 @@ Plug 'tpope/vim-sensible'
 Plug 'vim-airline/vim-airline'
 Plug 'airblade/vim-gitgutter'
 Plug 'christoomey/vim-tmux-navigator'
+Plug 'Shougo/unite.vim'
+Plug 'Shougo/vimfiler.vim', { 'on': 'VimFiler' }
 
 " Themes
 Plug 'rakr/vim-one'
