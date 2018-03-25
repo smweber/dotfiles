@@ -39,6 +39,8 @@ let g:ale_completion_enabled = 1
 let g:deoplete#enable_at_startup = 1
 map ` :VimFiler -explorer<CR>
 map ~ :VimFilerCurrentDir -explorer -find<CR>
+autocmd FileType vimfiler nunmap <buffer> <C-l>
+autocmd FileType vimfiler nunmap <buffer> <C-j>
 " Use tab to select autocomplete (from Deoplete currently)
 inoremap <expr> <Tab> pumvisible() ? "\<C-n>" : "\<Tab>"
 let g:necoghc_use_stack = 1
@@ -48,7 +50,6 @@ let g:necoghc_use_stack = 1
 nnoremap <SPACE> <Nop>
 let mapleader=' '
 nmap <Leader>nn :set invnumber<CR>
-let mapleader=' '
 set nowrap
 set expandtab           " Replaces actual tab with spaces (Ctrl-V tab for real tabs)
 set shiftwidth=4        " Determines indent for >> and <<
