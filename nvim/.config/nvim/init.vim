@@ -5,8 +5,7 @@ Plug 'tpope/vim-sensible'
 Plug 'vim-airline/vim-airline'
 Plug 'airblade/vim-gitgutter'
 Plug 'christoomey/vim-tmux-navigator'
-Plug 'Shougo/unite.vim'
-Plug 'Shougo/vimfiler.vim', { 'on': 'VimFiler' }
+Plug 'scrooloose/nerdtree'
 
 " Themes
 Plug 'rakr/vim-one'
@@ -37,10 +36,9 @@ call plug#end()
 "---------- Config Packages ----------
 let g:ale_completion_enabled = 1
 let g:deoplete#enable_at_startup = 1
-map ` :VimFiler -explorer<CR>
-map ~ :VimFilerCurrentDir -explorer -find<CR>
-autocmd FileType vimfiler nunmap <buffer> <C-l>
-autocmd FileType vimfiler nunmap <buffer> <C-j>
+map ` :NERDTreeToggle<CR>
+let NERDTreeMinimalUI = 1
+let NERDTreeDirArrows = 1
 " Use tab to select autocomplete (from Deoplete currently)
 inoremap <expr> <Tab> pumvisible() ? "\<C-n>" : "\<Tab>"
 let g:necoghc_use_stack = 1
