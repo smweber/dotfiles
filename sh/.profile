@@ -16,13 +16,8 @@ if [ -n "$BASH_VERSION" ]; then
     fi
 fi
 
-# set PATH so it includes user's private bin if it exists
-if [ -d "$HOME/.local/bin" ] ; then
-    PATH="$HOME/.local/bin:$PATH"
-fi
-if [ -d "$HOME/bin" ] ; then
-    PATH="$HOME/bin:$PATH"
-fi
+export EDITOR=nvim
+export GOPATH=$HOME/src/go
+export PATH=$GOPATH/bin:$PATH
 
-export EDITOR=vim
 set -o vi

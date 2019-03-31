@@ -23,3 +23,9 @@
     defaultToUpstream = true
 [include]
     path = ~/.gitconfig.local
+[diff]
+	algorithm = patience
+[protocol]
+	version = 2
+[credential]
+	helper = osxkeychain
