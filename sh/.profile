@@ -16,8 +16,9 @@ if [ -n "$BASH_VERSION" ]; then
     fi
 fi
 
+set -o vi
+
 export EDITOR=nvim
 export GOPATH=$HOME/src/go
 export PATH=$GOPATH/bin:$PATH
-
-set -o vi
+export PATH="$HOME/.cargo/bin:$PATH"
