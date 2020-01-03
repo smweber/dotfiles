@@ -15,6 +15,7 @@ Plug 'joshdick/onedark.vim'
 Plug 'ctrlpvim/ctrlp.vim'   " File opening
 Plug 'w0rp/ale'             " Async linting
 Plug 'sheerun/vim-polyglot' " A collection of language packs
+"""" Should switch to coc.vim???
 Plug 'Shougo/deoplete.nvim', { 'do': ':UpdateRemotePlugins' } " Async Completion
 Plug 'tpope/vim-sleuth'     " Heuristically set buffer options
 
