@@ -1,0 +1,58 @@
+{
+    // Standard
+    "terminal.integrated.fontFamily": "MesloLGL Nerd Font",
+    "workbench.colorTheme": "One Dark Pro",
+    "editor.tabCompletion": "on",
+    "window.zoomLevel": 0,
+    "files.trimTrailingWhitespace": true,
+    "editor.formatOnSaveTimeout": 1500,
+    "files.autoSave": "onFocusChange",
+    "explorer.confirmDelete": false,
+    "diffEditor.renderSideBySide": true,
+
+    // Git Lens
+    "gitlens.hovers.currentLine.enabled": false,
+    "gitlens.settings.mode": "advanced",
+    "gitlens.recentChanges.highlight.locations": [
+        "gutter",
+        "line",
+        "overview"
+    ],
+    "gitlens.statusBar.enabled": false,
+    "gitlens.showWhatsNewAfterUpgrades": false,
+
+    // JS/TypeScript
+    "eslint.validate": [
+        "javascript",
+        "javascriptreact"
+    ],
+    "[typescriptreact]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[javascript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+    "[typescript]": {
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+    },
+
+    // Ruby
+    //"solargraph.transport": "external",
+    //"solargraph.externalServer": {
+    //    "host": "localhost",
+    //    "port": 7658
+    //},
+    "ruby.lint": {
+        "rubocop": true,
+        "ruby": true, //Runs ruby -wc
+    },
+    "[ruby]": {
+        //"editor.formatOnSave": true
+    },
+    "ruby.format": "rubocop",
+
+    // Rust
+    "rust-client.rustupPath": "/Users/sweber/.cargo/bin/rustup",
+    "window.titleBarStyle": "native",
+    "terminal.external.osxExec": "iTerm.app"
+}
