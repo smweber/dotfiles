@@ -51,8 +51,18 @@
     },
     "ruby.format": "rubocop",
 
+    // *EXPERIMENTAL* Sorbet
+    "sorbet.runWith": ["/opt/dev/bin/shim", "bundle", "exec", "srb"],
+    "sorbet.sorbetPath": "tc",
+    "sorbet.intellisenseProvider": "sorbet",
+    "sorbet.extraArgs": [
+	"--enable-all-experimental-lsp-features",
+    ],
+    "sorbet.logLevel": 1,<Paste>
+
     // Rust
     "rust-client.rustupPath": "/Users/sweber/.cargo/bin/rustup",
     "window.titleBarStyle": "native",
     "terminal.external.osxExec": "iTerm.app"
+
 }
