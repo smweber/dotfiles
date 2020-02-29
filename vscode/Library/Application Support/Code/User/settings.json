@@ -37,19 +37,14 @@
     },
 
     // Ruby
-    //"solargraph.transport": "external",
-    //"solargraph.externalServer": {
-    //    "host": "localhost",
-    //    "port": 7658
-    //},
     "ruby.lint": {
-        "rubocop": true,
+        //"rubocop": true,
         "ruby": true, //Runs ruby -wc
     },
     "[ruby]": {
         //"editor.formatOnSave": true
     },
-    "ruby.format": "rubocop",
+    "ruby.format": "standard",
 
     // *EXPERIMENTAL* Sorbet
     "sorbet.runWith": ["/opt/dev/bin/shim", "bundle", "exec", "srb"],
@@ -58,7 +53,7 @@
     "sorbet.extraArgs": [
 	"--enable-all-experimental-lsp-features",
     ],
-    "sorbet.logLevel": 1,<Paste>
+    "sorbet.logLevel": 1,
 
     // Rust
     "rust-client.rustupPath": "/Users/sweber/.cargo/bin/rustup",
