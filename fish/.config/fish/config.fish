@@ -1,6 +1,6 @@
 fish_vi_key_bindings
 set -g theme_display_vi yes
-set -g theme_nerd_fonts yes
+#set -g theme_nerd_fonts yes
 
 # Parse env variable exports from ~/.profile
 egrep "^export " ~/.profile | while read e
