@@ -29,6 +29,8 @@ nnoremap <c-j> <c-w><c-j>
 nnoremap <c-h> <c-w><c-h>
 nnoremap <c-l> <c-w><c-l>
 
+" Yank and copy with system clipboard
+set clipboard+=unnamedplus
 
 " ---------- Writing and Wrapping Functions -----------
 function! s:wrapIt()
