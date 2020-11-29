@@ -98,6 +98,7 @@ class new_note(Command):
         else:
             note_title = datetime.now().strftime('%A, %B %d, %Y at %H:%M:%S')
             title_string = datetime.now().strftime("%H-%M-%S")
+
         date_string = datetime.now().strftime("%Y-%m-%d")
         target_filename = str(date_string + "_" + title_string + ".md")
 
@@ -123,3 +124,13 @@ class new_note(Command):
         # content of the current directory.
         return self._tab_directory_content()
 
+class notes(Command):
+    # The so-called doc-string of the class will be visible in the built-in
+    # help that is accessible by typing "?c" inside ranger.
+    """:notes
+
+    Open the notes directory
+    """
+
+    def execute(self):
+        self.fm.cd("~/.notes")
