@@ -60,3 +60,66 @@ class my_edit(Command):
         # This is a generic tab-completion function that iterates through the
         # content of the current directory.
         return self._tab_directory_content()
+
+# Any class that is a subclass of "Command" will be integrated into ranger as a
+# command.  Try typing ":my_edit<ENTER>" in ranger!
+class new_note(Command):
+    # The so-called doc-string of the class will be visible in the built-in
+    # help that is accessible by typing "?c" inside ranger.
+    """:new_note <note title>
+
+    Create a new Markdown note with a date-prepended filename and the title prepopulated.
+    """
+
+    def execute(self):
+        from os.path import join, expanduser, lexists
+        from datetime import datetime
+
+        def slugify(value, allow_unicode=False):
+            import unicodedata, re
+            """
+            Convert to ASCII if 'allow_unicode' is False. Convert spaces or repeated
+            dashes to single dashes. Remove characters that aren't alphanumerics,
+            underscores, or hyphens. Convert to lowercase. Also strip leading and
+            trailing whitespace, dashes, and underscores.
+            """
+            value = unicode(value)
+            if allow_unicode:
+                value = unicodedata.normalize('NFKC', value)
+            else:
+                value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
+            value = re.sub(r'[^\w\s-]', '', value.lower())
+            return re.sub(r'[-\s]+', '-', value).strip('-_')   
+
+        # Build a fancy filename for our new note
+        if self.arg(1):
+            note_title = self.rest(1).strip()
+            title_string = slugify(note_title)
+        else:
+            note_title = datetime.now().strftime('%A, %B %d, %Y at %H:%M:%S')
+            title_string = datetime.now().strftime("%H-%M-%S")
+        date_string = datetime.now().strftime("%Y-%m-%d")
+        target_filename = str(date_string + "_" + title_string + ".md")
+
+        fname = join(self.fm.thisdir.path, target_filename)
+
+        if not lexists(fname):
+            handle = open(fname, 'a')
+            handle.write(note_title + "\n" + ("=" * len(note_title)))
+            handle.close()
+        else:
+            self.fm.notify("file/directory exists!", bad=True)
+
+        self.fm.reload_cwd()
+        self.fm.edit_file(fname)
+        self.fm.notify("FILENAME: " + fname)
+        self.fm.select_file(fname)
+
+    # The tab method is called when you press tab, and should return a list of
+    # suggestions that the user will tab through.
+    # tabnum is 1 for <TAB> and -1 for <S-TAB> by default
+    def tab(self, tabnum):
+        # This is a generic tab-completion function that iterates through the
+        # content of the current directory.
+        return self._tab_directory_content()
+
