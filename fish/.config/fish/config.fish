@@ -33,3 +33,7 @@ if test -f /opt/dev/dev.fish
 end
 
 eval (direnv hook fish)
+
+if test -f "/Users/sweber/.shopify-app-cli/shopify.fish"
+  source "/Users/sweber/.shopify-app-cli/shopify.fish"
+end
