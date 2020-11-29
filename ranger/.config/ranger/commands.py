@@ -74,39 +74,31 @@ class new_note(Command):
     def execute(self):
         from os.path import join, expanduser, lexists
         from datetime import datetime
-
-        def slugify(value, allow_unicode=False):
-            import unicodedata, re
-            """
-            Convert to ASCII if 'allow_unicode' is False. Convert spaces or repeated
-            dashes to single dashes. Remove characters that aren't alphanumerics,
-            underscores, or hyphens. Convert to lowercase. Also strip leading and
-            trailing whitespace, dashes, and underscores.
-            """
-            value = unicode(value)
-            if allow_unicode:
-                value = unicodedata.normalize('NFKC', value)
-            else:
-                value = unicodedata.normalize('NFKD', value).encode('ascii', 'ignore').decode('ascii')
-            value = re.sub(r'[^\w\s-]', '', value.lower())
-            return re.sub(r'[-\s]+', '-', value).strip('-_')   
+        import unicodedata, re
 
         # Build a fancy filename for our new note
         if self.arg(1):
-            note_title = self.rest(1).strip()
-            title_string = slugify(note_title)
+            text = self.rest(1).strip()
+            file_title = unicode(text)
+            file_title = unicodedata.normalize('NFKD', file_title).encode('ascii', 'ignore').decode('ascii')
+            file_title = re.sub(r'[^\w\s-]', '', file_title)
+            note_title = text
         else:
+            file_title = datetime.now().strftime("%H-%M-%S")
             note_title = datetime.now().strftime('%A, %B %d, %Y at %H:%M:%S')
-            title_string = datetime.now().strftime("%H-%M-%S")
 
         date_string = datetime.now().strftime("%Y-%m-%d")
-        target_filename = str(date_string + "_" + title_string + ".md")
+        target_filename = str(date_string + " - " + file_title + ".md")
 
         fname = join(self.fm.thisdir.path, target_filename)
 
         if not lexists(fname):
             handle = open(fname, 'a')
-            handle.write(note_title + "\n" + ("=" * len(note_title)))
+            handle.write(note_title)
+            handle.write("\n" + ("=" * len(note_title)))
+            handle.write("\n(" + datetime.now().strftime('%A, %B %d, %Y at %I:%M %p') + ")")
+            handle.write("\n")
+
             handle.close()
         else:
             self.fm.notify("file/directory exists!", bad=True)
