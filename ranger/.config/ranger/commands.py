@@ -61,28 +61,43 @@ class my_edit(Command):
         # content of the current directory.
         return self._tab_directory_content()
 
-# Any class that is a subclass of "Command" will be integrated into ranger as a
-# command.  Try typing ":my_edit<ENTER>" in ranger!
-class new_note(Command):
-    # The so-called doc-string of the class will be visible in the built-in
-    # help that is accessible by typing "?c" inside ranger.
-    """:new_note <note title>
 
-    Create a new Markdown note with a date-prepended filename and the title prepopulated.
+class notes(Command):
+    """:notes
+
+    Entry to notes system. Changes directory and sets some things up, then run subcommand if present.
     """
 
     def execute(self):
+        self.fm.cd("~/.notes")
+        self.fm.thisdir.unload()
+        self.fm.thisdir.flat = -1
+        self.fm.thisdir.load_content()
+        self.fm.execute_console("setlocal path=.notes sort mtime")
+        self.fm.execute_console("setlocal path=.notes sort_directories_first false")
+        self.fm.execute_console("default_linemode path=.notes sizehumanreadablemtime")
+
+        if self.arg(1).strip() == "new":
+            self.new_note(self.rest(2))
+
+    def tab(self, tabnum):
+        return ["notes new "]
+
+    def new_note(self, title):
+        """:notes new <note title>
+
+        Create a new Markdown note with a date-prepended filename and the title prepopulated.
+        """
         from os.path import join, expanduser, lexists
         from datetime import datetime
         import unicodedata, re
 
         # Build a fancy filename for our new note
-        if self.arg(1):
-            text = self.rest(1).strip()
-            file_title = unicode(text)
+        if title:
+            file_title = unicode(title)
             file_title = unicodedata.normalize('NFKD', file_title).encode('ascii', 'ignore').decode('ascii')
             file_title = re.sub(r'[^\w\s-]', '', file_title)
-            note_title = text
+            note_title = title
         else:
             file_title = datetime.now().strftime("%H-%M-%S")
             note_title = datetime.now().strftime('%A, %B %d, %Y at %H:%M:%S')
@@ -105,27 +120,4 @@ class new_note(Command):
 
         self.fm.reload_cwd()
         self.fm.edit_file(fname)
-        self.fm.notify("FILENAME: " + fname)
         self.fm.select_file(fname)
-
-    # The tab method is called when you press tab, and should return a list of
-    # suggestions that the user will tab through.
-    # tabnum is 1 for <TAB> and -1 for <S-TAB> by default
-    def tab(self, tabnum):
-        # This is a generic tab-completion function that iterates through the
-        # content of the current directory.
-        return self._tab_directory_content()
-
-class notes(Command):
-    # The so-called doc-string of the class will be visible in the built-in
-    # help that is accessible by typing "?c" inside ranger.
-    """:notes
-
-    Open the notes directory
-    """
-
-    def execute(self):
-        self.fm.cd("~/.notes")
-        self.fm.thisdir.unload()
-        self.fm.thisdir.flat = -1
-        self.fm.thisdir.load_content()
