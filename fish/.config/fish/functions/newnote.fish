@@ -1,3 +1,3 @@
 function newnote
-ranger ~/.notes --cmd="new_note $argv"
+    ranger --cmd="notes" --cmd="new_note $argv"
 end

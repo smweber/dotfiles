@@ -134,3 +134,6 @@ class notes(Command):
 
     def execute(self):
         self.fm.cd("~/.notes")
+        self.fm.thisdir.unload()
+        self.fm.thisdir.flat = -1
+        self.fm.thisdir.load_content()
