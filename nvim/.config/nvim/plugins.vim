@@ -20,10 +20,6 @@ Plug 'tpope/vim-sleuth'     " Heuristically set buffer options
 " CoC (LSP support for 'intellisense')
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
 
-" Elixir
-Plug 'slashmili/alchemist.vim'
-" Haskell
-Plug 'eagletmt/neco-ghc'
 " Ruby/Rails
 Plug 'tpope/vim-rails'
 Plug 'vim-ruby/vim-ruby'
