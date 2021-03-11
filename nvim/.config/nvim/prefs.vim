@@ -17,6 +17,8 @@ set splitbelow
 set splitright
 set number
 
+set mouse=a " turns out, even in the terminal, vim is just as sweet with a mouse
+
 " Colourscheme
 "set termguicolors
 colorscheme onedark
