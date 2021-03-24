@@ -94,8 +94,8 @@ class notes(Command):
 
         # Build a fancy filename for our new note
         if title:
-            file_title = unicode(title)
-            file_title = unicodedata.normalize('NFKD', file_title).encode('ascii', 'ignore').decode('ascii')
+            #file_title = unicode(title)
+            file_title = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode('ascii')
             file_title = re.sub(r'[^\w\s-]', '', file_title)
             note_title = title
         else:
