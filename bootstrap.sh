@@ -55,7 +55,7 @@ elif [[ $1 == "brew" ]]; then
     PKGS=("${COMMON_PKGS[@]}" "${BREW_PKGS[@]}")
     STOWS=("${COMMON_STOWS[@]}" "${BREW_STOWS[@]}")
     function installcmd () {
-        (brew list $1 && echo "$1 already installed") || (echo "Installing $1" && brew install $1)
+        (brew ls --version $1 && echo "$1 already installed") || (echo "Installing $1" && brew install $1)
     }
     # Need to install casks for homebrew
     for CASK in ${BREW_CASKS[@]}; do
