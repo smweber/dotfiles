@@ -20,5 +20,8 @@ set -o vi
 
 export EDITOR=nvim
 export GOPATH=$HOME/src/go
+export N_PREFIX=$HOME/.n
+export PATH="/opt/homebrew/bin:$PATH"
+export PATH="$HOME/.n/bin:$PATH"
 export PATH=$GOPATH/bin:$PATH
-export PATH="$HOME/.cargo/bin:$PATH"
+. "$HOME/.cargo/env"
