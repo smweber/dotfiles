@@ -1,4 +1,3 @@
-# Defined in /var/folders/g3/clwzdfnj3x500hlx1xvkc94w0000gn/T//fish.dRSufV/forwardports.fish @ line 2
 function forwardports --description 'Use ssh to tunnel localhost ports to a remote machine'
 
     set -l ssh_control_socket "/tmp/ssh-fish-forwardports"
@@ -8,8 +7,14 @@ function forwardports --description 'Use ssh to tunnel localhost ports to a remo
     or return
 
     if set -q _flag_help
-        echo "forwardports [-h|--help] [-c|--clear] [HOST] [PORTS]"
+        echo "forwardports [-h|--help] [-c|--clear] [<HOST> <PORT(S)>]"
         return 0
+    end
+
+    # If the control socket is missing, SSH isn't running so clean up before proceeding
+    if test ! -S $ssh_control_socket
+        set -e CURRENTLY_FORWARDED_PORTS
+        set -e CURRENTLY_FORWARDED_PORTS_HOST
     end
 
     # List currently exposed ports
@@ -23,6 +28,7 @@ function forwardports --description 'Use ssh to tunnel localhost ports to a remo
         $ssh_command -S $ssh_control_socket -O check $CURRENTLY_FORWARDED_PORTS_HOST 
     end
 
+    # -c was passed, stop SSH and clean up
     if set -q _flag_clear
         if set -q CURRENTLY_FORWARDED_PORTS_HOST
             echo
