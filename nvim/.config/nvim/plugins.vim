@@ -21,7 +21,9 @@ Plug 'rakr/vim-one'
 Plug 'joshdick/onedark.vim'
 
 " Development
-Plug 'ctrlpvim/ctrlp.vim'   " File opening
+"Plug 'ctrlpvim/ctrlp.vim'   " File opening
+Plug 'junegunn/fzf'         " File opening and more (basic fzf wrapper)
+Plug 'junegunn/fzf.vim'     " (Need this one too for nice functionality)
 Plug 'sheerun/vim-polyglot' " A collection of language packs
 Plug 'tpope/vim-sleuth'     " Heuristically set buffer options
 "Plug 'w0rp/ale'             " Async linting
@@ -45,5 +47,8 @@ let NERDTreeMinimalUI = 1
 let NERDTreeDirArrows = 1
 
 let g:blamer_enabled = 1
+
+" Use fzf like ctrlp (with Ctrl-P)
+nnoremap <C-p> :Files<Cr>
 
 " (Note: CoC config is separate, in coc-config.vim)

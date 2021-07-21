@@ -33,4 +33,5 @@
 	writeCommitGraph = true
 [user]
 	name = Scott Weber
-	email = scott@r45.ca
+  #email = scott@r45.ca
+  email = scott@beeper.com
