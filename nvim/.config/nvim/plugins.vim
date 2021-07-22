@@ -50,5 +50,6 @@ let g:blamer_enabled = 1
 
 " Use fzf like ctrlp (with Ctrl-P)
 nnoremap <C-p> :Files<Cr>
+nnoremap <C-p><C-p> :Rg<Space>
 
 " (Note: CoC config is separate, in coc-config.vim)
