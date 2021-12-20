@@ -25,6 +25,12 @@
     path = ~/.gitconfig.local
 [diff]
 	algorithm = patience
+  colorMoved = default
+[pager]
+  diff = delta
+  log = delta
+  reflog = delta
+  show = delta
 [protocol]
 	version = 2
 [core]
@@ -35,3 +41,5 @@
 	name = Scott Weber
   #email = scott@r45.ca
   email = scott@beeper.com
+[init]
+	defaultBranch = main

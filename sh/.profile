@@ -25,4 +25,6 @@ export N_PREFIX=$HOME/.n
 export PATH="/opt/homebrew/bin:$PATH"
 export PATH="$HOME/.n/bin:$PATH"
 export PATH=$GOPATH/bin:$PATH
+export PATH="$HOME/.beeper-stack-tools:$PATH"
 . "$HOME/.cargo/env"
+eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"

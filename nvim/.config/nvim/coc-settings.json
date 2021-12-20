@@ -8,5 +8,10 @@
       "initializationOptions": {},
       "settings": {}
     }
+  },
+  "python": {
+      "linting": {
+          "mypyEnabled": true
+      }
   }
 }

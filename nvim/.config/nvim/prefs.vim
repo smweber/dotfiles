@@ -23,6 +23,8 @@ set mouse=a " turns out, even in the terminal, vim is just as sweet with a mouse
 autocmd FileType html setlocal shiftwidth=2 softtabstop=2
 autocmd FileType javascript setlocal shiftwidth=2 softtabstop=2
 autocmd FileType typescript setlocal shiftwidth=2 softtabstop=2
+autocmd FileType javascriptreact setlocal shiftwidth=2 softtabstop=2
+autocmd FileType typescriptreact setlocal shiftwidth=2 softtabstop=2
 
 " Colourscheme
 "set termguicolors
