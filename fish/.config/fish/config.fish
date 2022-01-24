@@ -35,3 +35,14 @@ if test -z (pgrep ssh-agent | string collect)
     set -Ux SSH_AUTH_SOCK $SSH_AUTH_SOCK
     set -Ux SSH_AGENT_PID $SSH_AGENT_PID
 end
+
+# Alises for Beeper k8s stuff
+alias k="kubectl"
+alias kl="k --kubeconfig kubeconfig.yaml"
+alias k9sl="k9s --kubeconfig kubeconfig.yaml"
+
+alias klh="kubectl --kubeconfig kubeconfig-hetzner.yaml"
+alias kla="kubectl --kubeconfig kubeconfig-aws.yaml"
+
+alias k9slh="k9s --kubeconfig kubeconfig-hetzner.yaml"
+alias k9sla="k9s --kubeconfig kubeconfig-aws.yaml"
