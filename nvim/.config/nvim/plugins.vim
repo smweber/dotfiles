@@ -31,6 +31,7 @@ Plug 'APZelos/blamer.nvim'
 
 " CoC (LSP support for 'intellisense')
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
+Plug 'liuchengxu/vista.vim'
 
 " Ruby/Rails
 "Plug 'tpope/vim-rails'
@@ -48,8 +49,23 @@ let NERDTreeDirArrows = 1
 
 let g:blamer_enabled = 1
 
+" Vista config
+nmap <Leader>v :Vista!!<Cr>
+let g:vista_default_executive = 'coc'
+function! NearestMethodOrFunction() abort
+  return get(b:, 'vista_nearest_method_or_function', '')
+endfunction
+set statusline+=%{NearestMethodOrFunction()}
+" By default vista.vim never run if you don't call it explicitly.
+" If you want to show the nearest function in your statusline automatically,
+" you can add the following line to your vimrc
+autocmd VimEnter * call vista#RunForNearestMethodOrFunction()
+
 " Use fzf like ctrlp (with Ctrl-P)
 nnoremap <C-p> :Files<Cr>
 nnoremap <C-p><C-p> :Rg<Space>
+
+" fzf + vista
+nnoremap <C-p><C-v> :Vista finder<Cr>
 
 " (Note: CoC config is separate, in coc-config.vim)

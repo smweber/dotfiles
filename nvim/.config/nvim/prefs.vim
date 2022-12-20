@@ -1,6 +1,4 @@
 " ---------- Scott's Preferences ----------
-nnoremap <SPACE> <Nop>
-let mapleader=' '
 nmap <Leader>nn :set invnumber<CR>
 set nowrap
 set expandtab           " Replaces actual tab with spaces (Ctrl-V tab for real tabs)
