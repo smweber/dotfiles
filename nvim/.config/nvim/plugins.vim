@@ -42,6 +42,10 @@ Plug 'junegunn/goyo.vim'
 
 " AI
 Plug 'codota/tabnine-nvim', { 'do': './dl_binaries.sh' }
+" CodeGPT
+Plug 'nvim-lua/plenary.nvim'
+Plug 'MunifTanjim/nui.nvim'
+Plug 'dpayne/CodeGPT.nvim'
 call plug#end()
 
 

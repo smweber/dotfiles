@@ -28,3 +28,8 @@ export PATH=$GOPATH/bin:$PATH
 export PATH="$HOME/.beeper-stack-tools:$PATH"
 . "$HOME/.cargo/env"
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+
+# Check to see if a file called .local_profile exists, and if it does source it
+if [ -f "$HOME/.local_profile" ]; then
+  . "$HOME/.local_profile"
+fi
