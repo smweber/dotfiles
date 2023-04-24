@@ -39,6 +39,9 @@ nnoremap <c-l> <c-w><c-l>
 " Yank and copy with system clipboard
 set clipboard+=unnamedplus
 
+" Easily reload config
+command! ReloadConfig source $MYVIMRC | runtime! plugin/**/*.vim
+
 " ---------- Writing and Wrapping Functions -----------
 function! s:wrapIt()
     set wrap linebreak nolist

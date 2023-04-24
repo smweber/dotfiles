@@ -41,7 +41,8 @@ Plug 'liuchengxu/vista.vim'
 Plug 'junegunn/goyo.vim'
 
 " AI
-Plug 'codota/tabnine-nvim', { 'do': './dl_binaries.sh' }
+"Plug 'codota/tabnine-nvim', { 'do': './dl_binaries.sh' }
+Plug 'github/copilot.vim'
 " CodeGPT
 Plug 'nvim-lua/plenary.nvim'
 Plug 'MunifTanjim/nui.nvim'
@@ -50,9 +51,19 @@ call plug#end()
 
 
 "---------- Config Packages ----------
-map ` :NERDTreeToggle<CR>
 let NERDTreeMinimalUI = 1
 let NERDTreeDirArrows = 1
+function! ToggleNERDTree()
+    if exists("b:NERDTree") " && b:NERDTreeType ==# 'primary'
+        wincmd p
+        execute "NERDTreeClose"
+    else
+        execute "NERDTreeFind"
+    endif
+endfunction
+nnoremap <silent> ` :call ToggleNERDTree()<CR>
+
+
 
 let g:blamer_enabled = 1
 
@@ -73,15 +84,15 @@ nnoremap <C-p><C-p> :Rg<Space>
 nnoremap <C-p><C-v> :Vista finder<Cr>
 
 " tabnine
-lua <<EOF
-require('tabnine').setup({
-  disable_auto_comment=true, 
-  accept_keymap="<Tab>",
-  dismiss_keymap = "<C-]>",
-  debounce_ms = 800,
-  suggestion_color = {gui = "#808080", cterm = 244},
-  exclude_filetypes = {"TelescopePrompt"}
-})
-EOF
+"lua <<EOF
+"require('tabnine').setup({
+"  disable_auto_comment=true, 
+"  accept_keymap="<Tab>",
+"  dismiss_keymap = "<C-]>",
+"  debounce_ms = 800,
+"  suggestion_color = {gui = "#808080", cterm = 244},
+"  exclude_filetypes = {"TelescopePrompt"}
+"})
+"EOF
 
 " (Note: CoC config is separate, in coc-config.vim)
