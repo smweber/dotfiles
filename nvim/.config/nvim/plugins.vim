@@ -33,6 +33,9 @@ Plug 'APZelos/blamer.nvim'
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
 Plug 'liuchengxu/vista.vim'
 
+" Autoformatting (for Go)
+Plug 'sbdchd/neoformat'
+
 " Ruby/Rails
 "Plug 'tpope/vim-rails'
 "Plug 'vim-ruby/vim-ruby'
@@ -82,6 +85,18 @@ nnoremap <C-p><C-p> :Rg<Space>
 
 " fzf + vista
 nnoremap <C-p><C-v> :Vista finder<Cr>
+
+" neoformat
+let g:neoformat_go_goimports = {
+\ 'exe': 'goimports',
+\ 'stdin': 1
+\ }
+let g:neoformat_enabled_go = ['goimports']
+augroup fmt
+  autocmd!
+  autocmd BufWritePre *.go undojoin | Neoformat
+augroup END
+
 
 " tabnine
 "lua <<EOF
