@@ -66,8 +66,7 @@ function! ToggleNERDTree()
 endfunction
 nnoremap <silent> ` :call ToggleNERDTree()<CR>
 
-
-
+" Enable blamer
 let g:blamer_enabled = 1
 
 " Vista config
@@ -97,17 +96,5 @@ augroup fmt
   autocmd BufWritePre *.go undojoin | Neoformat
 augroup END
 
-
-" tabnine
-"lua <<EOF
-"require('tabnine').setup({
-"  disable_auto_comment=true, 
-"  accept_keymap="<Tab>",
-"  dismiss_keymap = "<C-]>",
-"  debounce_ms = 800,
-"  suggestion_color = {gui = "#808080", cterm = 244},
-"  exclude_filetypes = {"TelescopePrompt"}
-"})
-"EOF
 
 " (Note: CoC config is separate, in coc-config.vim)
