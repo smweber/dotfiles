@@ -43,7 +43,7 @@
 [protocol]
 	version = 2
 [core]
-	pager = delta
+	#pager = delta
 	commitGraph = true
 [gc]
 	writeCommitGraph = true
