@@ -10,6 +10,7 @@ TMUX_DARKTHEME="@catppuccin_flavour 'frappe'"
 VIMCONF="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/prefs.vim"
 ALACRITTYCONF="$HOME/.alacritty.toml"
 TMUXCONF="$HOME/.tmux.conf"
+THEME_MODE_FILE="$HOME/.theme_mode" # File to store current theme mode on Linux
 
 # Get the actual files (follow symlinks)
 REAL_ALACRITTYCONF=$(readlink -f "$ALACRITTYCONF" 2>/dev/null || echo "$ALACRITTYCONF")
@@ -34,11 +35,15 @@ switch_vim_theme() {
 # Determine OS type
 OS_TYPE=$(uname)
 
-# Check current macOS theme if on macOS
+# Check current theme mode
 if [ "$OS_TYPE" = "Darwin" ]; then
   CURRENT_MODE=$(osascript -e 'tell app "System Events" to tell appearance preferences to return dark mode')
 else
-  CURRENT_MODE="false" # Default for Linux, can be modified based on Linux desktop environment
+  if [ -f "$THEME_MODE_FILE" ]; then
+    CURRENT_MODE=$(cat "$THEME_MODE_FILE")
+  else
+    CURRENT_MODE="false" # Default to light theme if file does not exist
+  fi
 fi
 
 # Function to use GNU sed or macOS sed
@@ -53,12 +58,14 @@ update_sed() {
 # Toggle logic based on current mode
 if [ "$CURRENT_MODE" = "true" ]; then
   [ "$OS_TYPE" = "Darwin" ] && switch_macos_theme
+  [ "$OS_TYPE" != "Darwin" ] && echo "false" > "$THEME_MODE_FILE" # Update theme mode file on Linux
   [ -f "$REAL_ALACRITTYCONF" ] && update_sed "s/${ALACRITTY_DARKTHEME}/${ALACRITTY_LIGHTTHEME}/" "$REAL_ALACRITTYCONF"
   update_sed "s/${TMUX_DARKTHEME}/${TMUX_LIGHTTHEME}/" "$REAL_TMUXCONF"
   update_sed 's/set background=dark/set background=light/' "$REAL_VIMCONF"
   switch_vim_theme "light"
 else
   [ "$OS_TYPE" = "Darwin" ] && switch_macos_theme
+  [ "$OS_TYPE" != "Darwin" ] && echo "true" > "$THEME_MODE_FILE" # Update theme mode file on Linux
   [ -f "$REAL_ALACRITTYCONF" ] && update_sed "s/${ALACRITTY_LIGHTTHEME}/${ALACRITTY_DARKTHEME}/" "$REAL_ALACRITTYCONF"
   update_sed "s/${TMUX_LIGHTTHEME}/${TMUX_DARKTHEME}/" "$REAL_TMUXCONF"
   update_sed 's/set background=light/set background=dark/' "$REAL_VIMCONF"
