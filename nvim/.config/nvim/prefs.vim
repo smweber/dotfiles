@@ -27,7 +27,7 @@ autocmd FileType typescriptreact setlocal shiftwidth=2 softtabstop=2
 " Colourscheme
 "set termguicolors
 colorscheme catppuccin
-"set background=dark
+set background=dark
 let g:airline_theme='catppuccin'
 
 " Tab and window movement

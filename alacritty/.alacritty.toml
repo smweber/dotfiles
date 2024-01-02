@@ -1,7 +1,6 @@
 live_config_reload = true
 
-# Good dark theme: "~/.config/alacritty/themes/themes/catppuccin.toml"
-# Good light theme: "~/.config/alacritty/themes/themes/catppuccin_latte.toml"
+# catppuccin for dark, catppuccin_light for light
 import = [
     "~/.config/alacritty/themes/themes/catppuccin.toml"
 ]
