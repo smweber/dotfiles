@@ -26,6 +26,7 @@ export PATH="/opt/homebrew/bin:$PATH"
 export PATH="$HOME/.n/bin:$PATH"
 export PATH=$GOPATH/bin:$PATH
 export PATH="$HOME/.beeper-stack-tools:$PATH"
+export PATH="$HOME/.dotfiles/bin:$PATH"
 export LIBRARY_PATH=/opt/homebrew/lib
 export C_INCLUDE_PATH=/opt/homebrew/include
 . "$HOME/.cargo/env"
