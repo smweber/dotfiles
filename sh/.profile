@@ -22,13 +22,15 @@ export EDITOR=nvim
 export XDG_CONFIG_HOME=$HOME/.config
 export GOPATH=$HOME/src/go
 export N_PREFIX=$HOME/.n
+export PATH="$HOME/.cargo/bin:$PATH"
 export PATH="/opt/homebrew/bin:$PATH"
+export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
 export PATH="$HOME/.n/bin:$PATH"
 export PATH=$GOPATH/bin:$PATH
 export PATH="$HOME/.beeper-stack-tools:$PATH"
 export PATH="$HOME/.dotfiles/bin:$PATH"
-export LIBRARY_PATH=/opt/homebrew/lib
-export C_INCLUDE_PATH=/opt/homebrew/include
+export LIBRARY_PATH="/opt/homebrew/lib:/home/linuxbrew/.linuxbrew/lib:$LIBRARY_PATH"
+export C_INCLUDE_PATH="/opt/homebrew/include:/home/linuxbrew/.linuxbrew/include:$C_INCLUDE_PATH"
 . "$HOME/.cargo/env"
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
