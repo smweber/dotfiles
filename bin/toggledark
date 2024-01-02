@@ -1,5 +1,5 @@
 #!/bin/sh
-# Toggle dark and light themes for tmux, Alacritty, and Neovim on macOS.
+# Toggle dark and light themes for tmux, Alacritty, and Neovim on macOS and Linux.
 
 ALACRITTY_LIGHTTHEME="catppuccin_latte.toml"
 ALACRITTY_DARKTHEME="catppuccin.toml"
@@ -12,9 +12,9 @@ ALACRITTYCONF="$HOME/.alacritty.toml"
 TMUXCONF="$HOME/.tmux.conf"
 
 # Get the actual files (follow symlinks)
-REAL_ALACRITTYCONF=$(readlink -f "$ALACRITTYCONF")
-REAL_VIMCONF=$(readlink -f "$VIMCONF")
-REAL_TMUXCONF=$(readlink -f "$TMUXCONF")
+REAL_ALACRITTYCONF=$(readlink -f "$ALACRITTYCONF" 2>/dev/null || echo "$ALACRITTYCONF")
+REAL_VIMCONF=$(readlink -f "$VIMCONF" 2>/dev/null || echo "$VIMCONF")
+REAL_TMUXCONF=$(readlink -f "$TMUXCONF" 2>/dev/null || echo "$TMUXCONF")
 
 # Function to switch macOS interface theme
 switch_macos_theme() {
@@ -31,21 +31,37 @@ switch_vim_theme() {
       ":set background=${theme_for_vim_panes}" Enter
 }
 
-# Check current macOS theme
-CURRENT_MODE=$(osascript -e 'tell app "System Events" to tell appearance preferences to return dark mode')
+# Determine OS type
+OS_TYPE=$(uname)
+
+# Check current macOS theme if on macOS
+if [ "$OS_TYPE" = "Darwin" ]; then
+  CURRENT_MODE=$(osascript -e 'tell app "System Events" to tell appearance preferences to return dark mode')
+else
+  CURRENT_MODE="false" # Default for Linux, can be modified based on Linux desktop environment
+fi
+
+# Function to use GNU sed or macOS sed
+update_sed() {
+  if [ "$OS_TYPE" = "Darwin" ]; then
+    sed -i '' "$@"
+  else
+    sed -i "$@"
+  fi
+}
 
 # Toggle logic based on current mode
 if [ "$CURRENT_MODE" = "true" ]; then
-  switch_macos_theme
-  sed -i '' "s/${ALACRITTY_DARKTHEME}/${ALACRITTY_LIGHTTHEME}/" "$REAL_ALACRITTYCONF"
-  sed -i '' "s/${TMUX_DARKTHEME}/${TMUX_LIGHTTHEME}/" "$REAL_TMUXCONF"
-  sed -i '' 's/set background=dark/set background=light/' "$REAL_VIMCONF"
+  [ "$OS_TYPE" = "Darwin" ] && switch_macos_theme
+  [ -f "$REAL_ALACRITTYCONF" ] && update_sed "s/${ALACRITTY_DARKTHEME}/${ALACRITTY_LIGHTTHEME}/" "$REAL_ALACRITTYCONF"
+  update_sed "s/${TMUX_DARKTHEME}/${TMUX_LIGHTTHEME}/" "$REAL_TMUXCONF"
+  update_sed 's/set background=dark/set background=light/' "$REAL_VIMCONF"
   switch_vim_theme "light"
 else
-  switch_macos_theme
-  sed -i '' "s/${ALACRITTY_LIGHTTHEME}/${ALACRITTY_DARKTHEME}/" "$REAL_ALACRITTYCONF"
-  sed -i '' "s/${TMUX_LIGHTTHEME}/${TMUX_DARKTHEME}/" "$REAL_TMUXCONF"
-  sed -i '' 's/set background=light/set background=dark/' "$REAL_VIMCONF"
+  [ "$OS_TYPE" = "Darwin" ] && switch_macos_theme
+  [ -f "$REAL_ALACRITTYCONF" ] && update_sed "s/${ALACRITTY_LIGHTTHEME}/${ALACRITTY_DARKTHEME}/" "$REAL_ALACRITTYCONF"
+  update_sed "s/${TMUX_LIGHTTHEME}/${TMUX_DARKTHEME}/" "$REAL_TMUXCONF"
+  update_sed 's/set background=light/set background=dark/' "$REAL_VIMCONF"
   switch_vim_theme "dark"
 fi
 
