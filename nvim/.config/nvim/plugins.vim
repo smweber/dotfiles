@@ -17,8 +17,9 @@ Plug 'scrooloose/nerdtree'
 Plug 'chrisbra/Colorizer'
 
 " Themes
-Plug 'rakr/vim-one'
+Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
 Plug 'joshdick/onedark.vim'
+Plug 'rakr/vim-one'
 
 " Development
 "Plug 'ctrlpvim/ctrlp.vim'   " File opening

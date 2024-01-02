@@ -1,3 +1,14 @@
+live_config_reload = true
+
+# Good dark theme: "~/.config/alacritty/themes/themes/catppuccin.toml"
+# Good light theme: "~/.config/alacritty/themes/themes/catppuccin_latte.toml"
+import = [
+    "~/.config/alacritty/themes/themes/catppuccin.toml"
+]
+
+[env]
+TERM = "xterm-256color"
+
 [font]
 size = 14.0
 
@@ -16,3 +27,11 @@ style = "Italic"
 [font.normal]
 family = "MesloLGSDZ Nerd Font"
 style = "Regular"
+
+[window]
+decorations = "buttonless"
+dynamic_padding = true
+
+[window.padding]
+x = 5
+y = 5
