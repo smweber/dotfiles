@@ -1,26 +1,20 @@
 #!/bin/sh
-# Toggle dark and light themes for Firefox, tmux, Alacritty,
-# and Neovim on macOS.
-
-TMUX_LIGHTTHEME="@catppuccin_flavour 'latte'"
-TMUX_DARKTHEME="@catppuccin_flavour 'frappe'"
+# Toggle dark and light themes for tmux, Alacritty, and Neovim on macOS.
 
 ALACRITTY_LIGHTTHEME="catppuccin_latte.toml"
 ALACRITTY_DARKTHEME="catppuccin.toml"
+
+TMUX_LIGHTTHEME="@catppuccin_flavour 'latte'"
+TMUX_DARKTHEME="@catppuccin_flavour 'frappe'"
 
 VIMCONF="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/prefs.vim"
 ALACRITTYCONF="$HOME/.alacritty.toml"
 TMUXCONF="$HOME/.tmux.conf"
 
-# Function to find the actual file a symlink points to
-real_file() {
-    readlink -f "$1"
-}
-
 # Get the actual files (follow symlinks)
-REAL_VIMCONF=$(real_file "$VIMCONF")
-REAL_ALACRITTYCONF=$(real_file "$ALACRITTYCONF")
-REAL_TMUXCONF=$(real_file "$TMUXCONF")
+REAL_ALACRITTYCONF=$(readlink -f "$ALACRITTYCONF")
+REAL_VIMCONF=$(readlink -f "$VIMCONF")
+REAL_TMUXCONF=$(readlink -f "$TMUXCONF")
 
 # Function to switch macOS interface theme
 switch_macos_theme() {
@@ -43,18 +37,17 @@ CURRENT_MODE=$(osascript -e 'tell app "System Events" to tell appearance prefere
 # Toggle logic based on current mode
 if [ "$CURRENT_MODE" = "true" ]; then
   switch_macos_theme
-  sed -i '' "s/${TMUX_DARKTHEME}/${TMUX_LIGHTTHEME}/" "$REAL_TMUXCONF"
   sed -i '' "s/${ALACRITTY_DARKTHEME}/${ALACRITTY_LIGHTTHEME}/" "$REAL_ALACRITTYCONF"
+  sed -i '' "s/${TMUX_DARKTHEME}/${TMUX_LIGHTTHEME}/" "$REAL_TMUXCONF"
   sed -i '' 's/set background=dark/set background=light/' "$REAL_VIMCONF"
   switch_vim_theme "light"
 else
   switch_macos_theme
-  sed -i '' "s/${TMUX_LIGHTTHEME}/${TMUX_DARKTHEME}/" "$REAL_TMUXCONF"
   sed -i '' "s/${ALACRITTY_LIGHTTHEME}/${ALACRITTY_DARKTHEME}/" "$REAL_ALACRITTYCONF"
+  sed -i '' "s/${TMUX_LIGHTTHEME}/${TMUX_DARKTHEME}/" "$REAL_TMUXCONF"
   sed -i '' 's/set background=light/set background=dark/' "$REAL_VIMCONF"
   switch_vim_theme "dark"
 fi
 
 # Reload tmux configuration
 tmux source-file "$REAL_TMUXCONF"
-
