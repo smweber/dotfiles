@@ -11,7 +11,8 @@ function parse_export_file
         # remove surrounding quotes if existing
         set value (echo $value | sed -E "s/^\"(.*)\"\$/\1/")
 
-        if test $var = "PATH"
+        # If the value contains a colon, we'll need to replace them
+        if test (echo $value | string match "*:*")
             # replace ":" by spaces. this is how PATH looks for Fish
             set value (echo $value | sed -E "s/:/ /g")
         
