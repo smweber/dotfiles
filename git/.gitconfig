@@ -28,28 +28,15 @@
 [diff]
 	algorithm = patience
 	colorMoved = default
-#[pager]
-#	diff = delta
-#	log = delta
-#	reflog = delta
-#	show = delta
-#	blame = delta
-[delta]
-	line-numbers = true
-	dark = true
-	navigate = true
-[interactive]
-	diffFilter = delta --color-only
 [protocol]
 	version = 2
 [core]
-	#pager = delta
 	commitGraph = true
 [gc]
 	writeCommitGraph = true
 [user]
 	name = Scott Weber
-    #email = scott@r45.ca
+	#email = scott@r45.ca
 	email = scott@beeper.com
 [init]
 	defaultBranch = main
