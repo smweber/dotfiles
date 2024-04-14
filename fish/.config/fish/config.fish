@@ -51,3 +51,4 @@ alias kla="kubectl --kubeconfig kubeconfig-aws.yaml"
 
 alias k9slh="k9s --kubeconfig kubeconfig-hetzner.yaml"
 alias k9sla="k9s --kubeconfig kubeconfig-aws.yaml"
+mise activate fish | source
