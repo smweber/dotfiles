@@ -34,6 +34,9 @@ parse_export_file ~/.local_profile
 
 eval (direnv hook fish)
 
+source "$HOME/.cargo/env.fish"
+fzf --fish | source
+
 # SSH Agent on Ubuntu
 if test -z (pgrep ssh-agent | string collect)
     eval (ssh-agent -c)
