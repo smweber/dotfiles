@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+TEMP_FILE=$(mktemp).png
+read -p "Enter the string to encode as a QR code: " INPUT_STRING
+qrencode -o $TEMP_FILE $INPUT_STRING
+open $TEMP_FILE
+
