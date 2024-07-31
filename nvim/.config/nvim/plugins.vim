@@ -71,9 +71,12 @@ nnoremap <silent> ` :call ToggleNERDTree()<CR>
 let g:blamer_enabled = 1
 
 " Vista config
-nmap <Leader>v :Vista!!<Cr>
+nmap <Leader>vv :Vista!!<Cr>
+nmap <Leader>vf :Vista finder<Cr>
 let g:vista_default_executive = 'coc'
 let g:vista_ignore_kinds = ['Variable']
+let g:vista_sidebar_width = 50
+"let g:vista_fzf_preview = ['right:50%']
 function! NearestMethodOrFunction() abort
   return get(b:, 'vista_nearest_method_or_function', '')
 endfunction
