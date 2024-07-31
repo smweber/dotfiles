@@ -71,8 +71,6 @@ nnoremap <silent> ` :call ToggleNERDTree()<CR>
 let g:blamer_enabled = 1
 
 " Vista config
-nmap <Leader>vv :Vista!!<Cr>
-nmap <Leader>vf :Vista finder<Cr>
 let g:vista_default_executive = 'coc'
 let g:vista_ignore_kinds = ['Variable']
 let g:vista_sidebar_width = 50
@@ -82,12 +80,15 @@ function! NearestMethodOrFunction() abort
 endfunction
 set statusline+=%{NearestMethodOrFunction()}
 
-" Use fzf like ctrlp (with Ctrl-P)
-nnoremap <C-p> :Files<Cr>
-nnoremap <C-p><C-p> :Rg<Space>
+" fzf layout
+let fzf_layout = { 'window': { 'width': 0.9, 'height': 0.9, 'relative': 'editor' } }
 
-" fzf + vista
-nnoremap <C-p><C-v> :Vista finder<Cr>
+" fzf and vista keybindings
+nnoremap <C-P> :Files<Cr>
+nnoremap <Leader>r :RG<Cr>
+nnoremap <C-Q> :Vista finder<Cr>
+nnoremap <Leader>vv :Vista!!<Cr>
+nnoremap <Leader>vf :Vista finder<Cr>
 
 " neoformat
 let g:neoformat_go_goimports = {
