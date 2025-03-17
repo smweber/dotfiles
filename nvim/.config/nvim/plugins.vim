@@ -30,6 +30,10 @@ Plug 'tpope/vim-sleuth'     " Heuristically set buffer options
 "Plug 'w0rp/ale'             " Async linting
 Plug 'APZelos/blamer.nvim'
 
+" Specifically to get :Gbrowse
+Plug 'tpope/vim-fugitive'
+Plug 'tpope/vim-rhubarb'
+
 " CoC (LSP support for 'intellisense')
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
 Plug 'liuchengxu/vista.vim'
@@ -37,20 +41,12 @@ Plug 'liuchengxu/vista.vim'
 " Autoformatting (for Go)
 Plug 'sbdchd/neoformat'
 
-" Ruby/Rails
-"Plug 'tpope/vim-rails'
-"Plug 'vim-ruby/vim-ruby'
-
 " Writing
 Plug 'junegunn/goyo.vim'
 
 " AI
-"Plug 'codota/tabnine-nvim', { 'do': './dl_binaries.sh' }
 Plug 'github/copilot.vim'
-" CodeGPT
-Plug 'nvim-lua/plenary.nvim'
-Plug 'MunifTanjim/nui.nvim'
-Plug 'dpayne/CodeGPT.nvim'
+
 call plug#end()
 
 
@@ -75,10 +71,10 @@ let g:vista_default_executive = 'coc'
 let g:vista_ignore_kinds = ['Variable']
 let g:vista_sidebar_width = 50
 "let g:vista_fzf_preview = ['right:50%']
-function! NearestMethodOrFunction() abort
-  return get(b:, 'vista_nearest_method_or_function', '')
-endfunction
-set statusline+=%{NearestMethodOrFunction()}
+"function! NearestMethodOrFunction() abort
+"  return get(b:, 'vista_nearest_method_or_function', '')
+"endfunction
+"set statusline+=%{NearestMethodOrFunction()}
 
 " fzf layout
 let fzf_layout = { 'window': { 'width': 0.9, 'height': 0.9, 'relative': 'editor' } }

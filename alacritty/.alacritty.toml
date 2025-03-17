@@ -2,7 +2,7 @@ live_config_reload = true
 
 # catppuccin for dark, catppuccin_light for light
 import = [
-    "~/.config/alacritty/themes/themes/catppuccin.toml"
+    "~/.config/alacritty/themes/themes/catppuccin_latte.toml"
 ]
 
 [env]

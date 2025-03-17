@@ -1,5 +1,6 @@
 " ---------- Scott's Preferences ----------
 nmap <Leader>nn :set invnumber<CR>
+nmap <Leader>nr :set invrelativenumber<CR>
 set nowrap
 set expandtab           " Replaces actual tab with spaces (Ctrl-V tab for real tabs)
 set shiftwidth=4        " Determines indent for >> and <<
@@ -41,6 +42,7 @@ set clipboard+=unnamedplus
 
 " Easily reload config
 command! ReloadConfig source $MYVIMRC | runtime! plugin/**/*.vim
+command! OpenConfig e $MYVIMRC
 
 " ---------- Writing and Wrapping Functions -----------
 function! s:wrapIt()
@@ -100,3 +102,11 @@ function! <SID>StripTrailingWhitespace()
 endfunction
 nmap <silent> <Leader>w :call <SID>StripTrailingWhitespace()<CR>
 
+" ---------- Clear Command Line ----------
+augroup clearcmdline
+    autocmd!
+    function! Echo_Nothing(timer)
+        echo ''
+    endfunction
+    autocmd CmdlineLeave * call timer_start(5000, 'Echo_Nothing')
+augroup END

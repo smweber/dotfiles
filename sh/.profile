@@ -21,6 +21,7 @@ set -o vi
 export EDITOR=nvim
 export XDG_CONFIG_HOME=$HOME/.config
 export GOPATH=$HOME/src/go
+export GOTOOLCHAIN=local
 export N_PREFIX=$HOME/.n
 export PATH="/opt/homebrew/bin:$PATH"
 export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
