@@ -20,18 +20,21 @@ set -o vi
 
 export EDITOR=nvim
 export XDG_CONFIG_HOME=$HOME/.config
+
 export GOPATH=$HOME/src/go
 export GOTOOLCHAIN=local
-export N_PREFIX=$HOME/.n
+
 export PATH="/opt/homebrew/bin:$PATH"
 export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
-export PATH="$HOME/.n/bin:$PATH"
 export PATH=$GOPATH/bin:$PATH
-export PATH="$HOME/.beeper-stack-tools:$PATH"
+export PATH="/Users/sweber/.local/bin:$PATH" # uv
 export PATH="$HOME/.dotfiles/bin:$PATH"
+
 export LIBRARY_PATH="/opt/homebrew/lib:/home/linuxbrew/.linuxbrew/lib:$LIBRARY_PATH"
 export C_INCLUDE_PATH="/opt/homebrew/include:/home/linuxbrew/.linuxbrew/include:$C_INCLUDE_PATH"
+
 . "$HOME/.cargo/env"
+
 eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 
 # Check to see if a file called .local_profile exists, and if it does source it
