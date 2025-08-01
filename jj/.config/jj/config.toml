@@ -5,6 +5,20 @@ name = "Scott Weber"
 email = "scott@r45.ca"
 
 [aliases]
+fetch   = ["git", "fetch", "--all-remotes"]
+publish = ["git", "push", "--allow-new"]
+clean   = ["util", "exec", "--", "git", "clean", "-e", ".jj", "-nx", ":/"]
+
+#track = ["util", "exec", "--", "bash", "-ec", "jj bookmark track $1@origin && jj new $1", ""]
+
+tug     = ["util", "exec", "--", "sh", "-c", """
+if [ "x$1" = "x" ]; then
+  jj bookmark move --from "closest_bookmark(@)" --to "closest_pushable(@)"
+else
+  jj bookmark move --to "closest_pushable(@)" "$@"
+fi
+""", ""]
+
 # (From https://github.com/jj-vcs/jj/discussions/5812#discussioncomment-13095720)
 
 # Some things to watch out for with jj aliases:
@@ -46,6 +60,10 @@ logpullall   = ["log", "-r", "@-..remote_bookmarks()"]        # unpulled from al
 # op log
 o          = ["op", "log"]                                      # all operations
 oo         = ["op", "log", "-T", "builtin_op_log_comfortable"]  # all operations, with more whitespace
+
+[revset-aliases]
+'closest_bookmark(to)' = 'heads(::to & bookmarks())'
+'closest_pushable(to)' = 'heads(::to & mutable() & ~description(exact:"") & (~empty() | merges()))'
 
 [template-aliases]
 # (From https://github.com/jj-vcs/jj/discussions/5812#discussioncomment-13095720)
