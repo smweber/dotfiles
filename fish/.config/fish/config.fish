@@ -7,7 +7,7 @@ function parse_export_file
     egrep "^export " $file | while read e
         set var (echo $e | sed -E "s/^export ([A-Z_]+)=(.*)\$/\1/")
         set value (echo $e | sed -E "s/^export ([A-Z_]+)=(.*)\$/\2/")
-        
+
         # remove surrounding quotes if existing
         set value (echo $value | sed -E "s/^\"(.*)\"\$/\1/")
 
@@ -15,7 +15,7 @@ function parse_export_file
         if test (echo $value | string match "*:*")
             # replace ":" by spaces. this is how PATH looks for Fish
             set value (echo $value | sed -E "s/:/ /g")
-        
+
             # use eval because we need to expand the value
             eval set -xg $var $value
 
@@ -33,8 +33,6 @@ parse_export_file ~/.profile
 parse_export_file ~/.local_profile
 
 eval (direnv hook fish)
-
-source "$HOME/.cargo/env.fish"
 fzf --fish | source
 
 # SSH Agent on Ubuntu
@@ -44,14 +42,4 @@ if test -z (pgrep ssh-agent | string collect)
     set -Ux SSH_AGENT_PID $SSH_AGENT_PID
 end
 
-# Alises for Beeper k8s stuff
-alias k="kubectl"
-alias kl="k --kubeconfig kubeconfig.yaml"
-alias k9sl="k9s --kubeconfig kubeconfig.yaml"
-
-alias klh="kubectl --kubeconfig kubeconfig-hetzner.yaml"
-alias kla="kubectl --kubeconfig kubeconfig-aws.yaml"
-
-alias k9slh="k9s --kubeconfig kubeconfig-hetzner.yaml"
-alias k9sla="k9s --kubeconfig kubeconfig-aws.yaml"
 mise activate fish | source
