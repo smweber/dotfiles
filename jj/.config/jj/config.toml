@@ -6,6 +6,7 @@ email = "scott@r45.ca"
 
 [aliases]
 fetch   = ["git", "fetch", "--all-remotes"]
+push    = ["git", "push"]
 publish = ["git", "push", "--allow-new"]
 clean   = ["util", "exec", "--", "git", "clean", "-e", ".jj", "-nx", ":/"]
 
@@ -17,6 +18,74 @@ if [ "x$1" = "x" ]; then
 else
   jj bookmark move --to "closest_pushable(@)" "$@"
 fi
+""", ""]
+
+# Adapted from https://github.com/glehmann/dotfiles/blob/main/.config/jj/config.toml
+generate-bookmark-name = ["util", "exec", "--", "bash", "-ec", """
+rev="closest_pushable(@)"
+if [ -n "$1" ]; then
+	rev=$1
+fi
+cat <<EOF > /tmp/jj-bookmark-prompt
+Generate a short branch name for these commits.
+Only produce one branch name without explanation.
+Use - as separator.
+Don't include any / character in the branch name.
+Never include WIP or feat in the branch name.
+
+EOF
+jj log -r "closest_bookmark($rev-)..$rev" --no-graph -T description -s >> /tmp/jj-bookmark-prompt
+prefix=scott/
+bookmark=$prefix`cat /tmp/jj-bookmark-prompt | llm --model gpt-5-nano`
+change_id=`jj log -T 'change_id.short(4)' --no-graph -r $rev`
+echo $bookmark-$change_id
+""", ""]
+
+# create and push bookmark
+publish-auto = ["util", "exec", "--", "bash", "-ec", """
+rev="closest_pushable(@)"
+if [ -n "$1" ]; then
+	rev=$1
+fi
+bookmark=`jj generate-bookmark-name $rev`
+jj bookmark set -r $rev $bookmark
+jj push -b $bookmark --allow-new
+""", ""]
+
+generate-commit-message = ["util", "exec", "--", "bash", "-ec", """
+rev="@"
+if [ -n "$1" ]; then
+	rev=$1
+fi
+cat <<EOF > /tmp/jj-commit-message-prompt
+Generate a short commit message based on this diff.
+Keep it under 75 characters.
+Only produce one line without explanation.
+Do not include a period at the end.
+Use only plain english, no prefixes like WIP or feat.
+
+EOF
+jj show --git $rev >> /tmp/jj-commit-message-prompt
+commit_message=`cat /tmp/jj-commit-message-prompt | llm --model gpt-5-nano`
+echo $commit_message
+""", ""]
+
+describe-auto = ["util", "exec", "--", "bash", "-ec", """
+rev="@"
+if [ -n "$1" ]; then
+  rev=$1
+fi
+commit_message=`jj generate-commit-message $rev`
+jj describe -m "$commit_message" $rev
+""", ""]
+
+commit-auto = ["util", "exec", "--", "bash", "-ec", """
+rev="@"
+if [ -n "$1" ]; then
+  rev=$1
+fi
+commit_message=`jj generate-commit-message $rev`
+jj commit -m "$commit_message"
 """, ""]
 
 # (From https://github.com/jj-vcs/jj/discussions/5812#discussioncomment-13095720)
