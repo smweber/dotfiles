@@ -1,0 +1,119 @@
+"$schema" = "https://jj-vcs.github.io/jj/latest/config-schema.json"
+
+[user]
+name = "Scott Weber"
+email = "scott@r45.ca"
+
+[aliases]
+# (From https://github.com/jj-vcs/jj/discussions/5812#discussioncomment-13095720)
+
+# Some things to watch out for with jj aliases:
+# - Keep them minimal; remain familiar with the builtin commands and defaults.
+# - If they use -r, a command line -r will add to that, not override it.
+# - If they use other options like -T or -n, those can't be overridden on the command line.
+
+# log aliases. Most of these use -T and -n; the b and custom variants also use -r.
+# All of them show graph structure; to hide it add --no-graph (can show confused output).
+
+# "l" aliases: list recent changes on multiple branches, elided, as one line.
+# add more l's to show more changes: l=10, ll=30, lll=100, llll=all
+l           = ["log", "-Tlog1", "-n10"]
+ll          = ["log", "-Tlog1", "-n30"]
+lll         = ["log", "-Tlog1", "-n100"]
+llll        = ["log", "-Tlog1"]
+
+# append a for "all()", as log defaults to local commits only
+la          = ["log", "-Tlog1", "-r", "all()", "-n10"]
+lla         = ["log", "-Tlog1", "-r", "all()", "-n30"]
+llla        = ["log", "-Tlog1", "-r", "all()", "-n100"]
+lllla       = ["log", "-Tlog1", "-r", "all()"]
+
+# append v to show full descriptions
+lv          = ["log", "-Tlogv", "-n10"]
+llv         = ["log", "-Tlogv", "-n30"]
+lllv        = ["log", "-Tlogv", "-n100"]
+llllv       = ["log", "-Tlogv"]
+
+# prepend b to show current branch only, non-elided
+bl          = ["log", "-Tlog1", "-r::@", "-n10"]
+bll         = ["log", "-Tlog1", "-r::@", "-n30"]
+blll        = ["log", "-Tlog1", "-r::@", "-n100"]
+bllll       = ["log", "-Tlog1", "-r::@"]
+
+blv         = ["log", "-Tlogv", "-r::@", "-n10"]
+bllv        = ["log", "-Tlogv", "-r::@", "-n30"]
+blllv       = ["log", "-Tlogv", "-r::@", "-n100"]
+bllllv      = ["log", "-Tlogv", "-r::@"]
+
+# "log1" aliases: list changes as one line, showing committer or author time in original or current time zone.
+log1        = ["log", "-Tlog1"]
+log1a       = ["log", "-Tlog1author"]
+log1z       = ["log", "-Tlog1current"]
+log1az      = ["log", "-Tlog1authorcurrent"]
+
+# "log" aliases: other custom change lists, using the default template (builtin_log_compact)
+#log                                                          # default log view: trunk and unmerged/unpushed branches, as two lines
+logconflicts = ["log", "-r", "conflicts()"]                   # conflicting commits
+lognew       = ["log", "-r", "(master..@):: | (master..@)-"]  # commits since master in current branch
+logpush      = ["log", "-r", "trunk()::@"]                    # unpushed to origin in current branch
+logpull      = ["log", "-r", "@..trunk()"]                    # unpulled from origin in current branch
+logpullall   = ["log", "-r", "@-..remote_bookmarks()"]        # unpulled from all remotes in current branch
+
+# op log
+o          = ["op", "log"]                                      # all operations
+oo         = ["op", "log", "-T", "builtin_op_log_comfortable"]  # all operations, with more whitespace
+
+[template-aliases]
+# (From https://github.com/jj-vcs/jj/discussions/5812#discussioncomment-13095720)
+# Additional templates and helpers.
+# log templates. Most of these use my smlog() layout.
+# Author's name, committer's timestamp and time zone, full descriptions.
+logv = 'smlog(original_time(committer.timestamp()), description, bookmarks, tags)'
+# Like logv but just one line of description.
+log1 = 'smlog(original_time(committer.timestamp()), description.first_line(), bookmarks, tags)'
+# Like log1 but shows committer's timestamp localised to current time zone.
+log1current = 'smlog(local_time(committer.timestamp()), description.first_line(), bookmarks, tags)'
+# Like log1 but shows author's timestamp and time zone.
+log1author = 'smlog(original_time(author.timestamp()), description.first_line(), bookmarks, tags)'
+# Like log1a but shows author's timestamp localised to current time zone.
+log1authorcurrent = 'smlog(local_time(author.timestamp()), description.first_line(), bookmarks, tags)'
+# Like log1 but don't show bookmarks.
+log1nobookmarks = 'smlog(original_time(committer.timestamp()), description.first_line(), "", tags)'
+# Like log1 but don't show tags.
+log1notags = 'smlog(original_time(committer.timestamp()), description.first_line(), bookmarks, "")'
+
+# helpers:
+'local_time(timestamp)'       = 'timestamp.local().format("%Y-%m-%d %H:%M:%S")'
+'localised_time(timestamp)'   = 'timestamp.local().format("%Y-%m-%d %H:%M:%S %z")'
+'original_time(timestamp)'    = 'timestamp.format("%Y-%m-%d %H:%M:%S %z")'
+
+# Generate a log template with a more aligned layout for readability:
+# both hashes and other fixed width fields on the left,
+# bookmarks and tags displayed optionally (used by jjbookmarks, jjtags),
+# bookmarks enclosed in brackets to distinguish them from tags,
+# description starting on the same line.
+'smlog(timestr, description, bookmarks, tags)' = '''
+if(root,
+  format_root_commit(self),
+  label(if(current_working_copy, "working_copy"),
+    concat(
+      separate(" ",
+        format_short_change_id_with_hidden_and_divergent_info(self),
+        format_short_commit_id(commit_id),
+        timestr,
+        if(author.email(), author.email().local(), email_placeholder),
+        if(bookmarks,surround("[","]",bookmarks),""),
+        tags,
+        working_copies,
+        if(git_head, label("git_head", "git_head()")),
+        if(conflict, label("conflict", "conflict")),
+        if(empty, label("empty", "(empty)")),
+        if(description,
+          description,
+          label(if(empty, "empty"), description_placeholder),
+        ),
+      ) ++ "\n",
+    ),
+  )
+)
+'''
