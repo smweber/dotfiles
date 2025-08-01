@@ -20,6 +20,18 @@ function fish_jj_prompt
                     separate(
                         " ",
                         bookmarks.join(", "),
+                        coalesce(
+                            surround(
+                                "\"",
+                                "\"",
+                                if(
+                                    description.first_line().substr(0, 16).starts_with(description.first_line()),
+                                    description.first_line().substr(0, 16),
+                                    description.first_line().substr(0, 15) ++ "…"
+                                )
+                            ),
+                            label(if(empty, "empty"), description_placeholder)
+                        ),
                         change_id.shortest(),
                         commit_id.shortest(),
                         if(conflict, label("conflict", "×")),
