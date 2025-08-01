@@ -17,39 +17,23 @@ email = "scott@r45.ca"
 
 # "l" aliases: list recent changes on multiple branches, elided, as one line.
 # add more l's to show more changes: l=10, ll=30, lll=100, llll=all
-l           = ["log", "-Tlog1", "-n10"]
-ll          = ["log", "-Tlog1", "-n30"]
-lll         = ["log", "-Tlog1", "-n100"]
-llll        = ["log", "-Tlog1"]
+l           = ["log", "-Tlog1", "-n25"]
+ll          = ["log", "-Tlog1"]
 
 # append a for "all()", as log defaults to local commits only
-la          = ["log", "-Tlog1", "-r", "all()", "-n10"]
-lla         = ["log", "-Tlog1", "-r", "all()", "-n30"]
-llla        = ["log", "-Tlog1", "-r", "all()", "-n100"]
-lllla       = ["log", "-Tlog1", "-r", "all()"]
+la          = ["log", "-Tlog1", "-r", "all()", "-n25"]
+lla         = ["log", "-Tlog1", "-r", "all()"]
 
 # append v to show full descriptions
-lv          = ["log", "-Tlogv", "-n10"]
-llv         = ["log", "-Tlogv", "-n30"]
-lllv        = ["log", "-Tlogv", "-n100"]
-llllv       = ["log", "-Tlogv"]
+lv          = ["log", "-Tlogv", "-n25"]
+llv         = ["log", "-Tlogv"]
 
 # prepend b to show current branch only, non-elided
-bl          = ["log", "-Tlog1", "-r::@", "-n10"]
-bll         = ["log", "-Tlog1", "-r::@", "-n30"]
-blll        = ["log", "-Tlog1", "-r::@", "-n100"]
-bllll       = ["log", "-Tlog1", "-r::@"]
+bl          = ["log", "-Tlog1", "-r::@", "-n25"]
+bll         = ["log", "-Tlog1", "-r::@"]
 
-blv         = ["log", "-Tlogv", "-r::@", "-n10"]
-bllv        = ["log", "-Tlogv", "-r::@", "-n30"]
-blllv       = ["log", "-Tlogv", "-r::@", "-n100"]
-bllllv      = ["log", "-Tlogv", "-r::@"]
-
-# "log1" aliases: list changes as one line, showing committer or author time in original or current time zone.
-log1        = ["log", "-Tlog1"]
-log1a       = ["log", "-Tlog1author"]
-log1z       = ["log", "-Tlog1current"]
-log1az      = ["log", "-Tlog1authorcurrent"]
+blv         = ["log", "-Tlogv", "-r::@", "-n25"]
+bllv        = ["log", "-Tlogv", "-r::@"]
 
 # "log" aliases: other custom change lists, using the default template (builtin_log_compact)
 #log                                                          # default log view: trunk and unmerged/unpushed branches, as two lines
@@ -71,16 +55,6 @@ oo         = ["op", "log", "-T", "builtin_op_log_comfortable"]  # all operations
 logv = 'smlog(original_time(committer.timestamp()), description, bookmarks, tags)'
 # Like logv but just one line of description.
 log1 = 'smlog(original_time(committer.timestamp()), description.first_line(), bookmarks, tags)'
-# Like log1 but shows committer's timestamp localised to current time zone.
-log1current = 'smlog(local_time(committer.timestamp()), description.first_line(), bookmarks, tags)'
-# Like log1 but shows author's timestamp and time zone.
-log1author = 'smlog(original_time(author.timestamp()), description.first_line(), bookmarks, tags)'
-# Like log1a but shows author's timestamp localised to current time zone.
-log1authorcurrent = 'smlog(local_time(author.timestamp()), description.first_line(), bookmarks, tags)'
-# Like log1 but don't show bookmarks.
-log1nobookmarks = 'smlog(original_time(committer.timestamp()), description.first_line(), "", tags)'
-# Like log1 but don't show tags.
-log1notags = 'smlog(original_time(committer.timestamp()), description.first_line(), bookmarks, "")'
 
 # helpers:
 'local_time(timestamp)'       = 'timestamp.local().format("%Y-%m-%d %H:%M:%S")'
