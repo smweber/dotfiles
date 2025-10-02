@@ -24,10 +24,11 @@ fi
 generate-bookmark-name = ["util", "exec", "--", "bash", "-ec", """
 rev="closest_pushable(@)"
 if [ -n "$1" ]; then
-	rev=$1
+  rev=$1
 fi
 cat <<EOF > /tmp/jj-bookmark-prompt
 Generate a short branch name for these commits.
+Keep it short. It doesn't have to describe everything.
 Only produce one branch name without explanation.
 Use - as separator.
 Don't include any / character in the branch name.
@@ -45,7 +46,7 @@ echo $bookmark-$change_id
 publish-auto = ["util", "exec", "--", "bash", "-ec", """
 rev="closest_pushable(@)"
 if [ -n "$1" ]; then
-	rev=$1
+  rev=$1
 fi
 bookmark=`jj generate-bookmark-name $rev`
 jj bookmark set -r $rev $bookmark
@@ -55,7 +56,7 @@ jj push -b $bookmark --allow-new
 generate-commit-message = ["util", "exec", "--", "bash", "-ec", """
 rev="@"
 if [ -n "$1" ]; then
-	rev=$1
+  rev=$1
 fi
 cat <<EOF > /tmp/jj-commit-message-prompt
 Generate a short commit message based on this diff.
@@ -141,7 +142,7 @@ oo         = ["op", "log", "-T", "builtin_op_log_comfortable"]  # all operations
 # Author's name, committer's timestamp and time zone, full descriptions.
 logv = 'smlog(original_time(committer.timestamp()), description, bookmarks, tags)'
 # Like logv but just one line of description.
-log1 = 'smlog(original_time(committer.timestamp()), description.first_line(), bookmarks, tags)'
+log1 = 'smlog(local_time(committer.timestamp()), description.first_line(), bookmarks, tags)'
 
 # helpers:
 'local_time(timestamp)'       = 'timestamp.local().format("%Y-%m-%d %H:%M:%S")'
