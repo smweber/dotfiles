@@ -4,6 +4,9 @@
 name = "Scott Weber"
 email = "scott@r45.ca"
 
+[ui]
+default-command = ["log", "-T", "logst"]
+
 [aliases]
 fetch   = ["git", "fetch", "--all-remotes"]
 push    = ["git", "push"]
@@ -136,13 +139,49 @@ oo         = ["op", "log", "-T", "builtin_op_log_comfortable"]  # all operations
 'closest_pushable(to)' = 'heads(::to & mutable() & ~description(exact:"") & (~empty() | merges()))'
 
 [template-aliases]
+# Based on https://gist.github.com/hroi/d0dc0e95221af858ee129fd66251897e
+myprompt = '''
+surround(
+    "(",
+    ")",
+    separate(
+      " ",
+      bookmarks.join(", "),
+      if(description,
+        surround("\"", "\"", truncate_end(16, description.first_line(), "…")),
+        label("description placeholder", "(Đ)"),
+        ),
+      change_id.shortest(),
+      if(conflict, label("conflict", "×")),
+      if(divergent, label("divergent", "??")),
+      if(hidden, label("hidden prefix", "(hidden)")),
+      if(immutable, label("node immutable", "◆")),
+      coalesce(
+          if(
+            empty,
+            coalesce(
+              if(
+                parents.len() > 1,
+                label("empty", "(merged)"),
+                ),
+              label("empty", "(∅)"),
+              ),
+            ),
+          label("description placeholder", "*")
+          ),
+      )
+      )
+'''
+
 # (From https://github.com/jj-vcs/jj/discussions/5812#discussioncomment-13095720)
 # Additional templates and helpers.
 # log templates. Most of these use my smlog() layout.
 # Author's name, committer's timestamp and time zone, full descriptions.
-logv = 'smlog(original_time(committer.timestamp()), description, bookmarks, tags)'
+logv  = 'smlog(original_time(committer.timestamp()), description, bookmarks, tags, false)'
 # Like logv but just one line of description.
-log1 = 'smlog(local_time(committer.timestamp()), description.first_line(), bookmarks, tags)'
+log1  = 'smlog(local_time(committer.timestamp()), description.first_line(), bookmarks, tags, false)'
+# Like log1 but with a summary of the diff for each commit (for a status-like view).
+logst = 'smlog(local_time(committer.timestamp()), description.first_line(), bookmarks, tags, true)'
 
 # helpers:
 'local_time(timestamp)'       = 'timestamp.local().format("%Y-%m-%d %H:%M:%S")'
@@ -154,7 +193,8 @@ log1 = 'smlog(local_time(committer.timestamp()), description.first_line(), bookm
 # bookmarks and tags displayed optionally (used by jjbookmarks, jjtags),
 # bookmarks enclosed in brackets to distinguish them from tags,
 # description starting on the same line.
-'smlog(timestr, description, bookmarks, tags)' = '''
+# (status is a bool for jj default command, idea from https://github.com/glehmann/dotfiles/blob/main/.config/jj/config.toml)
+'smlog(timestr, description, bookmarks, tags, status)' = '''
 if(root,
   format_root_commit(self),
   label(if(current_working_copy, "working_copy"),
@@ -174,8 +214,12 @@ if(root,
           description,
           label(if(empty, "empty"), description_placeholder),
         ),
-      ) ++ "\n",
-    ),
+      )
+      ++ "\n"
+      ++ if((current_working_copy || !description) && !empty && status,
+        label("conflict", self.files().filter(|f| f.file_type() == "conflict").map(|f| "C " ++ f.path() ++ "\n").join(""))
+        ++ diff.summary() ++ "\n"),
+      ),
   )
 )
 '''
