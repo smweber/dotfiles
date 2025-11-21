@@ -11,10 +11,13 @@ call plug#begin()
 " Change Behaviour
 Plug 'tpope/vim-sensible'
 Plug 'vim-airline/vim-airline'
-Plug 'airblade/vim-gitgutter'
 Plug 'christoomey/vim-tmux-navigator'
 Plug 'scrooloose/nerdtree'
 Plug 'chrisbra/Colorizer'
+"Plug 'airblade/vim-gitgutter'
+
+Plug 'algmyr/vclib.nvim'
+Plug 'algmyr/vcsigns.nvim' " VCS agnostic gutter signs
 
 " Themes
 Plug 'catppuccin/nvim', { 'as': 'catppuccin' }
@@ -22,17 +25,15 @@ Plug 'joshdick/onedark.vim'
 Plug 'rakr/vim-one'
 
 " Development
-"Plug 'ctrlpvim/ctrlp.vim'   " File opening
 Plug 'junegunn/fzf'         " File opening and more (basic fzf wrapper)
 Plug 'junegunn/fzf.vim'     " (Need this one too for nice functionality)
 Plug 'sheerun/vim-polyglot' " A collection of language packs
 Plug 'tpope/vim-sleuth'     " Heuristically set buffer options
-"Plug 'w0rp/ale'             " Async linting
 Plug 'APZelos/blamer.nvim'
 
 " Specifically to get :Gbrowse
-Plug 'tpope/vim-fugitive'
-Plug 'tpope/vim-rhubarb'
+"Plug 'tpope/vim-fugitive'
+"Plug 'tpope/vim-rhubarb'
 
 " CoC (LSP support for 'intellisense')
 Plug 'neoclide/coc.nvim', {'branch': 'release'}
@@ -100,5 +101,34 @@ augroup END
 " Fix airline/neovim whitespace trailing bug
 " (https://github.com/vim-airline/vim-airline/issues/2704)
 let g:airline#extensions#whitespace#symbol = '!'
+
+" VCSigns config and keybindings
+lua << EOF
+require('vcsigns').setup {
+  target_commit = 1,  -- Nice default for jj with new+squash flow.
+}
+
+local function map(mode, lhs, rhs, desc, opts)
+  local options = { noremap = true, silent = true, desc = desc }
+  if opts then options = vim.tbl_extend('force', options, opts) end
+  vim.keymap.set(mode, lhs, rhs, options)
+end
+
+map('n', '[r', function() require('vcsigns.actions').target_older_commit(0, vim.v.count1) end, 'Move diff target back')
+map('n', ']r', function() require('vcsigns.actions').target_newer_commit(0, vim.v.count1) end, 'Move diff target forward')
+
+map('n', '[c', function() require('vcsigns.actions').hunk_prev(0, vim.v.count1) end, 'Go to previous hunk')
+map('n', ']c', function() require('vcsigns.actions').hunk_next(0, vim.v.count1) end, 'Go to next hunk')
+
+map('n', '[C', function() require('vcsigns.actions').hunk_prev(0, 9999) end, 'Go to first hunk')
+map('n', ']C', function() require('vcsigns.actions').hunk_next(0, 9999) end, 'Go to last hunk')
+
+map('n', '<leader>su', function() require('vcsigns.actions').hunk_undo(0) end, 'Undo hunks under cursor')
+map('v', '<leader>su', function() require('vcsigns.actions').hunk_undo(0) end, 'Undo hunks in range')
+
+map('n', '<leader>sd', function() require('vcsigns.actions').toggle_hunk_diff(0) end, 'Show hunk diffs inline in the current buffer')
+
+map('n', '<leader>sf', function() require('vcsigns.fold').toggle(0) end, 'Fold outside hunks')
+EOF
 
 " (Note: CoC config is separate, in coc-config.vim)
