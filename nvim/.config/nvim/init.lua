@@ -15,7 +15,6 @@ require('config.nvim-tree')
 require('config.blamer')
 require('config.telescope')
 require('config.neoformat')
-require('config.vcsigns')
 require('config.lualine')
 
 -- Load user preferences
