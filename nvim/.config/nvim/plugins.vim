@@ -35,9 +35,28 @@ Plug 'APZelos/blamer.nvim'
 "Plug 'tpope/vim-fugitive'
 "Plug 'tpope/vim-rhubarb'
 
-" CoC (LSP support for 'intellisense')
-Plug 'neoclide/coc.nvim', {'branch': 'release'}
-Plug 'liuchengxu/vista.vim'
+" CoC (LSP support for 'intellisense') - MIGRATING TO NATIVE LSP
+" Plug 'neoclide/coc.nvim', {'branch': 'release'}
+" Plug 'liuchengxu/vista.vim'
+
+" Native LSP & Completion
+Plug 'neovim/nvim-lspconfig'
+Plug 'hrsh7th/nvim-cmp'
+Plug 'hrsh7th/cmp-nvim-lsp'
+Plug 'hrsh7th/cmp-buffer'
+Plug 'hrsh7th/cmp-path'
+Plug 'L3MON4D3/LuaSnip'
+Plug 'saadparwaiz1/cmp_luasnip'
+
+" Symbol outline & fuzzy finder
+Plug 'stevearc/aerial.nvim'
+Plug 'nvim-telescope/telescope.nvim'
+Plug 'nvim-lua/plenary.nvim'
+
+" Treesitter
+Plug 'nvim-treesitter/nvim-treesitter', {'do': ':TSUpdate'}
+" Note: nvim-treesitter-textobjects is incompatible with latest nvim-treesitter
+" Plug 'nvim-treesitter/nvim-treesitter-textobjects'
 
 " Autoformatting (for Go)
 Plug 'sbdchd/neoformat'
@@ -46,7 +65,7 @@ Plug 'sbdchd/neoformat'
 Plug 'junegunn/goyo.vim'
 
 " AI
-Plug 'github/copilot.vim'
+"Plug 'github/copilot.vim'
 
 call plug#end()
 

@@ -110,3 +110,11 @@ augroup clearcmdline
     endfunction
     autocmd CmdlineLeave * call timer_start(5000, 'Echo_Nothing')
 augroup END
+
+" ---------- LSP Configuration ----------
+" Inlay hint styling (make them subtle like comments)
+lua vim.api.nvim_set_hl(0, 'LspInlayHint', { link = 'Comment' })
+
+" LSP Commands (matching CoC's :Format and :OR)
+command! -nargs=0 Format lua vim.lsp.buf.format({ async = false })
+command! -nargs=0 OR lua vim.lsp.buf.code_action({ context = { only = { 'source.organizeImports' } }, apply = true })
