@@ -16,7 +16,7 @@ set background=dark
 colorscheme catppuccin
 
 " Load plugin configurations
-lua require('config.nerdtree')
+lua require('config.nvim-tree')
 lua require('config.blamer')
 lua require('config.fzf')
 lua require('config.neoformat')

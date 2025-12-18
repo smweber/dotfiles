@@ -7,7 +7,10 @@ return {
     dependencies = { 'vim-airline/vim-airline-themes' },
   },
   'christoomey/vim-tmux-navigator',
-  'scrooloose/nerdtree',
+  {
+    'nvim-tree/nvim-tree.lua',
+    dependencies = { 'nvim-tree/nvim-web-devicons' },
+  },
   'chrisbra/Colorizer',
 
   -- VCS Signs (for jj/git)
