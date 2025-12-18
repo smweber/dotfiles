@@ -21,7 +21,7 @@ lua require('config.blamer')
 lua require('config.telescope')
 lua require('config.neoformat')
 lua require('config.vcsigns')
-lua require('config.airline')
+lua require('config.lualine')
 
 " Load LSP and completion configurations
 lua require('lsp')

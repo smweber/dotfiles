@@ -3,8 +3,8 @@ return {
   -- Change Behaviour
   'tpope/vim-sensible',
   {
-    'vim-airline/vim-airline',
-    dependencies = { 'vim-airline/vim-airline-themes' },
+    'nvim-lualine/lualine.nvim',
+    dependencies = { 'nvim-tree/nvim-web-devicons' },
   },
   'christoomey/vim-tmux-navigator',
   {
