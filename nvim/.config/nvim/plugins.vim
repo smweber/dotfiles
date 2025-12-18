@@ -66,6 +66,7 @@ Plug 'junegunn/goyo.vim'
 
 " AI
 "Plug 'github/copilot.vim'
+Plug 'Exafunction/windsurf.vim'
 
 call plug#end()
 
