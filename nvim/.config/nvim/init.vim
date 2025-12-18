@@ -18,7 +18,7 @@ colorscheme catppuccin
 " Load plugin configurations
 lua require('config.nvim-tree')
 lua require('config.blamer')
-lua require('config.fzf')
+lua require('config.telescope')
 lua require('config.neoformat')
 lua require('config.vcsigns')
 lua require('config.airline')
