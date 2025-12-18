@@ -1,18 +1,25 @@
 let g:nvim_config_root = stdpath('config')
-let g:config_file_list = [
-\ 'plugins.vim',
-\ 'prefs.vim'
-\ ]
 
 " Set leader before any configs are loaded
 nnoremap <SPACE> <Nop>
 let mapleader=' '
 
-for f in g:config_file_list
-    execute 'source ' . g:nvim_config_root . '/' . f
-endfor
+" Load preferences
+execute 'source ' . g:nvim_config_root . '/prefs.vim'
 
-" Load Lua configurations
+" Bootstrap and setup lazy.nvim
+lua require('lazy-bootstrap')
+lua require('lazy').setup('plugins')
+
+" Load plugin configurations
+lua require('config.nerdtree')
+lua require('config.blamer')
+lua require('config.fzf')
+lua require('config.neoformat')
+lua require('config.vcsigns')
+lua require('config.airline')
+
+" Load LSP and completion configurations
 lua require('lsp')
 lua require('completion')
 lua require('aerial-config')
@@ -23,4 +30,3 @@ if not ok then
   vim.notify('Treesitter config failed to load (may need :TSUpdate): ' .. tostring(err), vim.log.levels.WARN)
 end
 EOF
-
