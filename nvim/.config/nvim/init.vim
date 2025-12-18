@@ -11,6 +11,10 @@ execute 'source ' . g:nvim_config_root . '/prefs.vim'
 lua require('lazy-bootstrap')
 lua require('lazy').setup('plugins')
 
+" Set colorscheme after plugins are loaded
+set background=dark
+colorscheme catppuccin
+
 " Load plugin configurations
 lua require('config.nerdtree')
 lua require('config.blamer')

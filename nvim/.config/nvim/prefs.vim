@@ -25,11 +25,7 @@ autocmd FileType typescript setlocal shiftwidth=2 softtabstop=2
 autocmd FileType javascriptreact setlocal shiftwidth=2 softtabstop=2
 autocmd FileType typescriptreact setlocal shiftwidth=2 softtabstop=2
 
-" Colourscheme
-"set termguicolors
-colorscheme catppuccin
-set background=dark
-let g:airline_theme='catppuccin'
+" Colourscheme (set in init.vim after plugins load)
 
 " Tab and window movement
 nnoremap <c-k> <c-w><c-k>
