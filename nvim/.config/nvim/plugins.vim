@@ -27,7 +27,6 @@ Plug 'rakr/vim-one'
 " Development
 Plug 'junegunn/fzf'         " File opening and more (basic fzf wrapper)
 Plug 'junegunn/fzf.vim'     " (Need this one too for nice functionality)
-Plug 'sheerun/vim-polyglot' " A collection of language packs
 Plug 'tpope/vim-sleuth'     " Heuristically set buffer options
 Plug 'APZelos/blamer.nvim'
 
@@ -87,25 +86,12 @@ nnoremap <silent> ` :call ToggleNERDTree()<CR>
 " Enable blamer
 let g:blamer_enabled = 1
 
-" Vista config
-let g:vista_default_executive = 'coc'
-let g:vista_ignore_kinds = ['Variable']
-let g:vista_sidebar_width = 50
-"let g:vista_fzf_preview = ['right:50%']
-"function! NearestMethodOrFunction() abort
-"  return get(b:, 'vista_nearest_method_or_function', '')
-"endfunction
-"set statusline+=%{NearestMethodOrFunction()}
-
 " fzf layout
 let fzf_layout = { 'window': { 'width': 0.9, 'height': 0.9, 'relative': 'editor' } }
 
-" fzf and vista keybindings
+" fzf keybindings
 nnoremap <C-P> :Files<Cr>
 nnoremap <Leader>r :RG<Cr>
-nnoremap <C-Q> :Vista finder<Cr>
-nnoremap <Leader>vv :Vista!!<Cr>
-nnoremap <Leader>vf :Vista finder<Cr>
 
 " neoformat
 let g:neoformat_go_goimports = {
@@ -150,5 +136,3 @@ map('n', '<leader>sd', function() require('vcsigns.actions').toggle_hunk_diff(0)
 
 map('n', '<leader>sf', function() require('vcsigns.fold').toggle(0) end, 'Fold outside hunks')
 EOF
-
-" (Note: CoC config is separate, in coc-config.vim)
