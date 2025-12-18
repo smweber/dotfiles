@@ -49,10 +49,7 @@ end
 set_indent({'html', 'javascript', 'typescript', 'javascriptreact', 'typescriptreact'}, 2)
 
 -- Tab and window movement keybindings
-vim.keymap.set('n', '<c-k>', '<c-w><c-k>', { noremap = true })
-vim.keymap.set('n', '<c-j>', '<c-w><c-j>', { noremap = true })
-vim.keymap.set('n', '<c-h>', '<c-w><c-h>', { noremap = true })
-vim.keymap.set('n', '<c-l>', '<c-w><c-l>', { noremap = true })
+-- Note: <c-h/j/k/l> are handled by vim-tmux-navigator plugin
 
 -- Config reload commands
 vim.api.nvim_create_user_command('ReloadConfig', function()
