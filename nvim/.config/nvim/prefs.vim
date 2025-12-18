@@ -2,6 +2,7 @@
 nmap <Leader>nn :set invnumber<CR>
 nmap <Leader>nr :set invrelativenumber<CR>
 set nowrap
+set tabstop=4           " Display TAB characters as 4 spaces wide
 set expandtab           " Replaces actual tab with spaces (Ctrl-V tab for real tabs)
 set shiftwidth=4        " Determines indent for >> and <<
 set softtabstop=4       " Determines indent for <TAB>
