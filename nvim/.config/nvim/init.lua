@@ -24,9 +24,3 @@ require('plugin-config.completion')
 
 -- Load LSP configuration
 require('lsp')
-
--- Load treesitter config, but don't fail if module isn't ready
-local ok, err = pcall(require, 'plugin-config.treesitter')
-if not ok then
-  vim.notify('Treesitter config failed to load (may need :TSUpdate): ' .. tostring(err), vim.log.levels.WARN)
-end

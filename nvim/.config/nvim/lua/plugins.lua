@@ -102,7 +102,15 @@ return {
   -- Treesitter
   {
     'nvim-treesitter/nvim-treesitter',
+    lazy = false,
     build = ':TSUpdate',
+  },
+  { -- needed since nvim-treesitter rewrite doesn't support autoinstall
+    'mks-h/treesitter-autoinstall.nvim',
+    dependencies = { 'nvim-treesitter/nvim-treesitter' },
+    config = function()
+      require('treesitter-autoinstall').setup()
+    end
   },
 
   -- Autoformatting (for Go)
