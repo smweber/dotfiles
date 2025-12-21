@@ -71,11 +71,6 @@ return {
   'rakr/vim-one',
 
   -- Development
-  {
-    'junegunn/fzf',
-    build = './install --bin',
-  },
-  'junegunn/fzf.vim',
   'tpope/vim-sleuth',
   'APZelos/blamer.nvim',
 
