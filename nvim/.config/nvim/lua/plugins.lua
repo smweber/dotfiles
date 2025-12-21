@@ -112,5 +112,26 @@ return {
   'junegunn/goyo.vim',
 
   -- AI
-  'Exafunction/windsurf.vim',
+  {
+    "Exafunction/windsurf.nvim",
+    dependencies = {
+      "nvim-lua/plenary.nvim",
+      "hrsh7th/nvim-cmp",
+    },
+    config = function()
+      require("codeium").setup({
+        enable_cmp_source = false,
+        virtual_text = {
+          enabled = true,
+          map_keys = true,
+          key_bindings = {
+            accept = "<C-y>",  -- Ctrl-Y to accept suggestions
+            next = "<M-]>",    -- Alt-] for next suggestion
+            prev = "<M-[>",    -- Alt-[ for previous suggestion
+            clear = "<C-]>",   -- Ctrl-] to dismiss
+          }
+        }
+      })
+    end
+  },
 }
