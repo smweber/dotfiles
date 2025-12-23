@@ -34,10 +34,10 @@ M.on_attach = function(client, bufnr)
   vim.keymap.set('n', '<leader>rn', vim.lsp.buf.rename,
     vim.tbl_extend('force', opts, { desc = 'Rename symbol' }))
 
-  -- Format
-  vim.keymap.set({ 'n', 'x' }, '<leader>f', function()
-    vim.lsp.buf.format({ async = false })
-  end, vim.tbl_extend('force', opts, { desc = 'Format code' }))
+  -- Format (moved to conform.lua)
+  -- vim.keymap.set({ 'n', 'x' }, '<leader>f', function()
+  --   vim.lsp.buf.format({ async = false })
+  -- end, vim.tbl_extend('force', opts, { desc = 'Format code' }))
 
   -- Code actions
   vim.keymap.set({ 'n', 'x' }, '<leader>ca', vim.lsp.buf.code_action,

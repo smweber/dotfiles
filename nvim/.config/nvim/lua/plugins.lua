@@ -108,8 +108,8 @@ return {
     end
   },
 
-  -- Autoformatting (for Go)
-  'sbdchd/neoformat',
+  -- Autoformatting
+  'stevearc/conform.nvim',
 
   -- Writing
   'junegunn/goyo.vim',
