@@ -9,10 +9,12 @@ default-command = ["log", "-T", "logst"]
 
 [aliases]
 fetch   = ["git", "fetch", "--all-remotes"]
+up      = ["fetch"]
 push    = ["git", "push"]
 publish = ["git", "push", "--allow-new"]
 clean   = ["util", "exec", "--", "git", "clean", "-e", ".jj", "-nx", ":/"]
 watch   = ["util", "exec", "--", "watch", "--color", "-n1", "-t", "jj", "--ignore-working-copy", "--color", "always"]
+watch-log = ["util", "exec", "--", "watch", "--color", "-n1", "-t", "jj", "lla", "--ignore-working-copy", "--color", "always"]
 
 #track = ["util", "exec", "--", "bash", "-ec", "jj bookmark track $1@origin && jj new $1", ""]
 
