@@ -24,5 +24,4 @@ vim.diagnostic.config({
 
 -- Load LSP modules
 require('lsp.keymaps')
-require('lsp.handlers')
 require('lsp.servers')

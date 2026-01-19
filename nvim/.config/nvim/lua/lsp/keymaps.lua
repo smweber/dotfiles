@@ -23,11 +23,11 @@ M.on_attach = function(client, bufnr)
     vim.tbl_extend('force', opts, { desc = 'Show references' }))
 
   -- Hover documentation
-  vim.keymap.set('n', 'K', vim.lsp.buf.hover,
+  vim.keymap.set('n', 'K', function() vim.lsp.buf.hover({ border = 'rounded' }) end,
     vim.tbl_extend('force', opts, { desc = 'Show hover documentation' }))
 
   -- Signature help
-  vim.keymap.set('i', '<C-k>', vim.lsp.buf.signature_help,
+  vim.keymap.set('i', '<C-k>', function() vim.lsp.buf.signature_help({ border = 'rounded' }) end,
     vim.tbl_extend('force', opts, { desc = 'Signature help' }))
 
   -- Rename
