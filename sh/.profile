@@ -26,8 +26,8 @@ export GOTOOLCHAIN=local
 
 export PATH="/opt/homebrew/bin:$PATH"
 export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
-export PATH=$GOPATH/bin:$PATH
-export PATH="/Users/sweber/.local/bin:$PATH" # uv
+export PATH="$GOPATH/bin:$PATH:"
+export PATH="$HOME/.local/bin:$PATH"
 export PATH="$HOME/.dotfiles/bin:$PATH"
 
 export LIBRARY_PATH="/opt/homebrew/lib:/home/linuxbrew/.linuxbrew/lib:$LIBRARY_PATH"
