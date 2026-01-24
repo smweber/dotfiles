@@ -1,5 +1,21 @@
 -- Scott's Preferences
 
+-- Content-based filetype detection for gleam (helps with difftastic buffers)
+vim.filetype.add({
+  pattern = {
+    ['.*'] = {
+      function(path, buf)
+        local lines = vim.api.nvim_buf_get_lines(buf, 0, 20, false)
+        local content = table.concat(lines, '\n')
+        if content:match('import gleam/') then
+          return 'gleam'
+        end
+      end,
+      { priority = -math.huge },
+    },
+  },
+})
+
 -- Keybindings for toggling line numbers
 vim.keymap.set('n', '<Leader>nn', ':set invnumber<CR>', { noremap = true })
 vim.keymap.set('n', '<Leader>nr', ':set invrelativenumber<CR>', { noremap = true })

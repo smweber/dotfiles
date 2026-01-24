@@ -64,9 +64,25 @@ return {
     "clabby/difftastic.nvim",
     dependencies = { "MunifTanjim/nui.nvim" },
     config = function()
-        require("difftastic-nvim").setup({
-            download = true, -- Auto-download pre-built binary
-        })
+      require("difftastic-nvim").setup({
+        download = true,
+        highlight_mode = "treesitter",
+        scroll_to_first_hunk = true,
+      })
+
+      vim.keymap.set('n', '<leader>d', function()
+        local diff = vim.fn.system('jj diff --stat')
+        local rev = diff:match('0 files changed') and '@-' or '@'
+        vim.cmd('Difft ' .. rev)
+        vim.defer_fn(function()
+          for _, win in ipairs(vim.api.nvim_list_wins()) do
+            local buf = vim.api.nvim_win_get_buf(win)
+            if vim.bo[buf].filetype == '' then
+              vim.api.nvim_buf_call(buf, function() vim.cmd('filetype detect') end)
+            end
+          end
+        end, 100)
+      end, { desc = 'Difftastic diff (@ or @- if empty)' })
     end,
   },
 
@@ -109,7 +125,9 @@ return {
     'mks-h/treesitter-autoinstall.nvim',
     dependencies = { 'nvim-treesitter/nvim-treesitter' },
     config = function()
-      require('treesitter-autoinstall').setup()
+      require('treesitter-autoinstall').setup({
+        ignore = { 'NvimTree', 'difft-tree', 'TelescopePrompt', 'aerial' },
+      })
     end
   },
 
