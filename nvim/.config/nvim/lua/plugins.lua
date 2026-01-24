@@ -58,6 +58,17 @@ return {
       map('n', '<leader>sf', function() require('vcsigns.fold').toggle(0) end, 'Fold outside hunks')
     end,
   },
+  -- VCS diffs with diftastic
+  -- See https://github.com/clabby/difftastic.nvim?tab=readme-ov-file#requirements for installing fork of difft
+  {
+    "clabby/difftastic.nvim",
+    dependencies = { "MunifTanjim/nui.nvim" },
+    config = function()
+        require("difftastic-nvim").setup({
+            download = true, -- Auto-download pre-built binary
+        })
+    end,
+  },
 
   -- Themes
   { 'catppuccin/nvim', name = 'catppuccin' },
