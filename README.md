@@ -27,3 +27,7 @@ For fish:
  - Also want patched fonts, perhaps from https://github.com/ryanoasis/nerd-fonts
     - `brew tap homebrew/cask-fonts`
     - `brew install font-meslo-lg-nerd-font`
+
+
+Linux packages:
+- i3, rofi, feh, polybar
