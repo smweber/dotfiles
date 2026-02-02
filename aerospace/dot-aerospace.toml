@@ -132,6 +132,7 @@ on-mode-changed = []
     alt-leftSquareBracket = 'workspace prev'
     alt-rightSquareBracket = 'workspace next'
     alt-enter = 'fullscreen'
+    alt-f = 'fullscreen'
     alt-shift-backslash = 'layout floating tiling'
 
     # See: https://nikitabobko.github.io/AeroSpace/commands#workspace
