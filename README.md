@@ -35,15 +35,15 @@ cd ~/.dotfiles
 # Linux: sudo apt install stow
 
 # Stow the configs you want (use --no-folding to create individual symlinks)
-stow --no-folding sh
-stow --no-folding fish
-stow --no-folding tmux
-stow --no-folding nvim
-stow --no-folding git
-stow --no-folding jj
-stow --no-folding alacritty  # GUI only
-# Linux GUI: stow --no-folding i3 rofi polybar
-# macOS: stow --no-folding aerospace
+stow --dotfiles --no-folding sh
+stow --dotfiles --no-folding fish
+stow --dotfiles --no-folding tmux
+stow --dotfiles --no-folding nvim
+stow --dotfiles --no-folding git
+stow --dotfiles --no-folding jj
+stow --dotfiles --no-folding alacritty  # GUI only
+# Linux GUI: stow --dotfiles --no-folding i3 rofi polybar
+# macOS: stow --dotfiles --no-folding aerospace
 ```
 
 ## What's Included

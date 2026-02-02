@@ -189,18 +189,38 @@ main() {
     fi
 
     # -------------------------------------------------------------------------
-    # Install GNU Stow
+    # Install Homebrew (needed for stow and other packages)
+    # -------------------------------------------------------------------------
+    step "Install Homebrew"
+    if has brew; then
+        info "Homebrew is already installed"
+    else
+        info "Homebrew is required for GNU Stow (apt version is too old)"
+        info "and will be used for other packages as well"
+        if ask "Install Homebrew?"; then
+            run '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+            # Add brew to path for this session
+            if [[ "$OS" == "linux" ]]; then
+                eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+            else
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            fi
+        fi
+    fi
+
+    # -------------------------------------------------------------------------
+    # Install GNU Stow (from Homebrew - apt version is too old for --dotfiles)
     # -------------------------------------------------------------------------
     step "Install GNU Stow"
-    if has stow; then
-        info "GNU Stow is already installed"
+    if has stow && [[ "$(stow --version 2>&1)" == *"2.4"* ]]; then
+        info "GNU Stow 2.4+ is already installed"
     else
-        if ask "Install GNU Stow?"; then
-            if [[ "$OS" == "macos" ]]; then
+        if has brew; then
+            if ask "Install GNU Stow from Homebrew?"; then
                 run "brew install stow"
-            else
-                run "sudo apt install -y stow"
             fi
+        else
+            info "Homebrew is required to install stow. Please install Homebrew first."
         fi
     fi
 
@@ -227,27 +247,9 @@ main() {
         for pkg in $ALL_STOW; do
             if [[ -d "$pkg" ]]; then
                 info "Stowing $pkg..."
-                stow --no-folding "$pkg" 2>/dev/null || info "  (already stowed or conflict)"
+                stow --dotfiles --no-folding "$pkg" 2>/dev/null || info "  (already stowed or conflict)"
             fi
         done
-    fi
-
-    # -------------------------------------------------------------------------
-    # Install Homebrew
-    # -------------------------------------------------------------------------
-    step "Install Homebrew"
-    if has brew; then
-        info "Homebrew is already installed"
-    else
-        info "Homebrew will be used for packages on macOS,"
-        info "and for packages missing/outdated on Linux"
-        if ask "Install Homebrew?"; then
-            run '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-            # Add brew to path for this session
-            if [[ "$OS" == "linux" ]]; then
-                eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-            fi
-        fi
     fi
 
     # -------------------------------------------------------------------------
