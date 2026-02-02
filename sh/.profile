@@ -33,9 +33,15 @@ export PATH="$HOME/.dotfiles/bin:$PATH"
 export LIBRARY_PATH="/opt/homebrew/lib:/home/linuxbrew/.linuxbrew/lib:$LIBRARY_PATH"
 export C_INCLUDE_PATH="/opt/homebrew/include:/home/linuxbrew/.linuxbrew/include:$C_INCLUDE_PATH"
 
-. "$HOME/.cargo/env"
+# NOTE: Lines below are ignored by fish (it only parses "export" lines via
+# parse_export_file in config.fish). These are bash-only, so we guard them.
 
-eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+# Cargo/Rust environment (if installed)
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+
+# Brew shellenv sets HOMEBREW_PREFIX and other vars (PATH already set above for fish)
+[ -d "/home/linuxbrew/.linuxbrew" ] && eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+[ -d "/opt/homebrew" ] && eval "$(/opt/homebrew/bin/brew shellenv)"
 
 # Check to see if a file called .local_profile exists, and if it does source it
 if [ -f "$HOME/.local_profile" ]; then
