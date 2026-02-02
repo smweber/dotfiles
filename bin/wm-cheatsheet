@@ -1,0 +1,454 @@
+#!/usr/bin/env python3
+"""
+Dynamic cheat sheet generator for i3 and AeroSpace window managers.
+Parses config files and displays a formatted cheat sheet.
+"""
+
+import os
+import re
+import sys
+from pathlib import Path
+
+# Config file locations
+AEROSPACE_CONFIG = Path.home() / ".aerospace.toml"
+I3_CONFIG = Path.home() / ".config/i3/config"
+
+# Also check dotfiles locations as fallback
+AEROSPACE_CONFIG_ALT = Path.home() / ".dotfiles/aerospace/dot-aerospace.toml"
+I3_CONFIG_ALT = Path.home() / ".dotfiles/i3/dot-config/i3/config"
+
+# Terminal dimensions
+MAX_WIDTH = 180
+MIN_HEIGHT = 40
+
+
+def get_terminal_size():
+    try:
+        columns, lines = os.get_terminal_size()
+        return min(columns, MAX_WIDTH), max(lines, MIN_HEIGHT)
+    except OSError:
+        return MAX_WIDTH, MIN_HEIGHT
+
+
+def parse_aerospace_config(config_path):
+    """Parse AeroSpace TOML config and extract keybindings."""
+    bindings = {"main": {}, "service": {}}
+
+    if not config_path.exists():
+        return bindings
+
+    content = config_path.read_text()
+    current_mode = None
+
+    for line in content.split("\n"):
+        line = line.strip()
+
+        # Detect mode sections
+        if line == "[mode.main.binding]":
+            current_mode = "main"
+            continue
+        elif line == "[mode.service.binding]":
+            current_mode = "service"
+            continue
+        elif line.startswith("[") and line.endswith("]"):
+            current_mode = None
+            continue
+
+        if current_mode and "=" in line and not line.startswith("#"):
+            # Parse: key = 'command' or key = ['cmd1', 'cmd2']
+            match = re.match(r"^([\w\-]+)\s*=\s*(.+)$", line)
+            if match:
+                key, value = match.groups()
+                # Clean up the value
+                value = value.strip()
+                if value.startswith("'") and value.endswith("'"):
+                    value = value[1:-1]
+                elif value.startswith('"') and value.endswith('"'):
+                    value = value[1:-1]
+                elif value.startswith("["):
+                    # Array of commands - simplify
+                    cmds = re.findall(r"'([^']+)'", value)
+                    value = " + ".join(cmds)
+
+                bindings[current_mode][key] = value
+
+    return bindings
+
+
+def parse_i3_config(config_path):
+    """Parse i3 config and extract keybindings."""
+    bindings = {"main": {}, "resize": {}}
+
+    if not config_path.exists():
+        return bindings
+
+    content = config_path.read_text()
+    current_mode = "main"
+    mod_key = "Mod4"  # default
+
+    for line in content.split("\n"):
+        line = line.strip()
+
+        # Get modifier key
+        if line.startswith("set $mod "):
+            mod_key = line.split()[-1]
+            continue
+
+        # Detect mode blocks
+        if line.startswith('mode "resize"'):
+            current_mode = "resize"
+            continue
+        elif current_mode == "resize" and line == "}":
+            current_mode = "main"
+            continue
+
+        # Parse bindsym lines
+        if line.startswith("bindsym "):
+            match = re.match(r"^bindsym\s+(\S+)\s+(.+)$", line)
+            if match:
+                key, cmd = match.groups()
+                # Replace $mod with actual key name for display
+                display_key = key.replace("$mod", "Super").replace("+", "-")
+                # Clean up command
+                cmd = re.sub(r"\s*--no-startup-id\s*", " ", cmd).strip()
+                cmd = re.sub(r'^exec\s+', "", cmd)
+                bindings[current_mode][display_key] = cmd
+
+    return bindings
+
+
+def format_key_aerospace(key):
+    """Format aerospace key for display."""
+    key = key.replace("leftSquareBracket", "[").replace("rightSquareBracket", "]")
+    return key.replace("-", " + ").replace("alt", "Alt").replace("shift", "Shift")
+
+
+def format_key_i3(key):
+    """Format i3 key for display."""
+    key = key.replace("bracketleft", "[").replace("bracketright", "]")
+    return key.replace("-", " + ").replace("Shift", "Shift")
+
+
+def categorize_bindings(aero_bindings, i3_bindings):
+    """Categorize bindings into unified, aerospace-only, i3-only."""
+
+    # Map of aerospace commands to i3 equivalents for matching
+    command_map = {
+        "focus left": "focus left",
+        "focus right": "focus right",
+        "focus up": "focus up",
+        "focus down": "focus down",
+        "move left": "move left",
+        "move right": "move right",
+        "move up": "move up",
+        "move down": "move down",
+        "fullscreen": "fullscreen toggle",
+        "layout floating tiling": "floating toggle",
+        "workspace prev": "workspace prev",
+        "workspace next": "workspace next",
+        "resize smart -50": "resize shrink",
+        "resize smart +50": "resize grow",
+    }
+
+    unified = []
+    aero_only = []
+    i3_only = []
+
+    # Find unified bindings (same action, corresponding keys)
+    aero_main = aero_bindings.get("main", {})
+    i3_main = i3_bindings.get("main", {})
+
+    matched_aero = set()
+    matched_i3 = set()
+
+    # Check for matching commands
+    for aero_key, aero_cmd in aero_main.items():
+        for i3_key, i3_cmd in i3_main.items():
+            # Check if commands match (approximately)
+            aero_base = aero_cmd.split()[0] if aero_cmd else ""
+            i3_base = i3_cmd.split()[0] if i3_cmd else ""
+
+            cmd_matches = (
+                aero_cmd == i3_cmd or
+                aero_cmd in command_map and command_map[aero_cmd] in i3_cmd or
+                (aero_base == i3_base and aero_base in ["focus", "move", "workspace", "fullscreen", "resize"])
+            )
+
+            # Check if keys are "equivalent" (same base key, different mod)
+            aero_parts = aero_key.replace("alt-", "").replace("shift-", "SHIFT-")
+            i3_parts = i3_key.replace("Super-", "").replace("Shift-", "SHIFT-")
+
+            # Normalize key names (aerospace vs i3 naming)
+            aero_parts = aero_parts.replace("leftSquareBracket", "bracketleft")
+            aero_parts = aero_parts.replace("rightSquareBracket", "bracketright")
+            aero_parts = aero_parts.replace("enter", "Return")
+
+            if cmd_matches and aero_parts == i3_parts:
+                unified.append((aero_key, i3_key, aero_cmd, i3_cmd))
+                matched_aero.add(aero_key)
+                matched_i3.add(i3_key)
+                break
+
+    # Collect unmatched
+    for key, cmd in aero_main.items():
+        if key not in matched_aero:
+            aero_only.append((key, cmd))
+
+    for key, cmd in i3_main.items():
+        if key not in matched_i3:
+            i3_only.append((key, cmd))
+
+    return unified, aero_only, i3_only
+
+
+def detect_wm():
+    """Detect which window manager is running."""
+    # Check for i3
+    if os.environ.get("I3SOCK") or os.environ.get("SWAYSOCK"):
+        return "i3"
+    # Check for aerospace (macOS)
+    if sys.platform == "darwin":
+        return "aerospace"
+    # Default based on platform
+    return "i3" if sys.platform.startswith("linux") else "aerospace"
+
+
+def render_cheatsheet(aero_bindings, i3_bindings, width, height):
+    """Render the cheat sheet to fit terminal."""
+
+    unified, aero_only, i3_only = categorize_bindings(aero_bindings, i3_bindings)
+    current_wm = detect_wm()
+
+    # ANSI colors
+    B = "\033[1m"      # bold
+    D = "\033[2m"      # dim
+    C = "\033[36m"     # cyan
+    Y = "\033[33m"     # yellow
+    G = "\033[32m"     # green
+    M = "\033[35m"     # magenta
+    R = "\033[0m"      # reset
+
+    def strip_ansi(s):
+        return re.sub(r'\033\[[0-9;]*m', '', s)
+
+    def pad(s, width):
+        """Pad string to width, accounting for ANSI codes."""
+        visible_len = len(strip_ansi(s))
+        return s + ' ' * (width - visible_len)
+
+    # Layout: Left column (unified) | Right column (aero-only + i3-only)
+    LEFT_W = 62
+    RCOL = 55  # each sub-column in right side
+    RIGHT_W = RCOL * 2 + 3  # includes " | " separator
+    TOTAL_W = LEFT_W + 3 + RIGHT_W  # includes " | " separator
+
+    # Build left column (unified)
+    left_lines = []
+    left_lines.append(f"{B}{G}UNIFIED{R} {D}(Alt/Super + key){R}")
+    left_lines.append("-" * LEFT_W)
+
+    def row_unified(action, aero, i3):
+        return f"{action:<20} {aero:<20} {i3:<20}"
+
+    left_lines.append(row_unified("Action", "AeroSpace", "i3"))
+
+    for aero_key, i3_key, aero_cmd, i3_cmd in unified:
+        if re.match(r"^(alt|shift)-\d$", aero_key):
+            continue
+        if re.match(r"^(alt|shift)-[a-z]$", aero_key) and "workspace" in aero_cmd.lower():
+            continue
+        action = aero_cmd[:19]
+        aero_k = format_key_aerospace(aero_key)[:19]
+        i3_k = format_key_i3(i3_key)[:19]
+        left_lines.append(row_unified(action, aero_k, i3_k))
+
+    left_lines.append(row_unified("Workspace 1-9", "Alt+1-9", "Super+1-9"))
+    left_lines.append(row_unified("Move to WS 1-9", "Alt+Shift+1-9", "Super+Shift+1-9"))
+    left_lines.append(row_unified("Workspace A-Z", "Alt+a-z", "(n/a)"))
+    left_lines.append("")
+    left_lines.append(f"{B}{C}LAYOUT CONCEPTS{R}")
+    left_lines.append("-" * LEFT_W)
+    left_lines.append(f"{M}AeroSpace:{R} tiles | accordion")
+    left_lines.append(f"  Alt+/ tile, Alt+, accordion")
+    left_lines.append(f"  Tree auto-normalizes")
+    left_lines.append(f"{Y}i3:{R} splith|splitv|tabbed|stacking")
+    left_lines.append(f"  Super+g/v split, Super+s/w/e layout")
+    left_lines.append(f"  Super+a parent, manual tree")
+
+    # Build right column (aerospace + i3 side by side)
+    right_lines = []
+
+    def row_right(left_text, right_text):
+        return pad(left_text, RCOL) + " | " + pad(right_text, RCOL)
+
+    right_lines.append(row_right(f"{B}{M}AEROSPACE ONLY{R}", f"{B}{Y}I3 ONLY{R}"))
+    right_lines.append("-" * RCOL + "-+-" + "-" * RCOL)
+
+    def describe_aero(cmd):
+        """Generate readable description for aerospace command."""
+        parts = cmd.split()
+        if not parts:
+            return ""
+        if parts[0] == "layout":
+            if "tiles" in parts:
+                return "tile layout"
+            if "accordion" in parts:
+                return "accordion layout"
+            return " ".join(parts[:2])
+        if parts[0] == "workspace":
+            if len(parts) > 1:
+                return f"workspace {parts[1]}"
+            return "workspace"
+        if parts[0] == "fullscreen":
+            return "fullscreen toggle"
+        if parts[0] == "mode":
+            return f"{parts[1]} mode" if len(parts) > 1 else "mode"
+        if parts[0] == "move-workspace-to-monitor":
+            return "move WS to monitor"
+        if parts[0] == "workspace-back-and-forth":
+            return "last workspace"
+        return parts[0]
+
+    def describe_i3(cmd):
+        """Generate readable description for i3 command."""
+        parts = cmd.split()
+        if not parts:
+            return ""
+        # Handle alacritty/terminal anywhere in command
+        if "alacritty" in cmd or "kitty" in cmd or "wezterm" in cmd:
+            return "terminal"
+        # Handle rofi anywhere in command
+        if "rofi" in cmd:
+            return "app launcher"
+        if parts[0] == "split":
+            return "split horiz" if "h" in parts else "split vert"
+        if parts[0] == "layout":
+            if "stacking" in cmd:
+                return "stacking layout"
+            if "tabbed" in cmd:
+                return "tabbed layout"
+            if "toggle" in cmd:
+                return "toggle split"
+            return " ".join(parts[:2])
+        if parts[0] == "focus":
+            if "mode_toggle" in cmd:
+                return "focus float/tile"
+            if "parent" in cmd:
+                return "focus parent"
+            return "focus"
+        if parts[0] == "kill":
+            return "close window"
+        if parts[0] == "reload":
+            return "reload config"
+        if parts[0] == "restart":
+            return "restart i3"
+        if parts[0] == "fullscreen":
+            return "fullscreen"
+        if parts[0] == "mode":
+            return "resize mode"
+        if parts[0] == "exec":
+            return parts[1].strip('"') if len(parts) > 1 else "exec"
+        return parts[0]
+
+    # Filter aerospace-only
+    aero_display = []
+    skip_aero = ["wm-cheatsheet", "osascript"]
+    for key, cmd in aero_only:
+        if re.match(r"^alt-[a-z0-9]$", key):
+            continue
+        if re.match(r"^alt-shift-[a-z0-9]$", key):
+            continue
+        if any(s in cmd for s in skip_aero):
+            continue
+        k = format_key_aerospace(key)[:24]
+        c = describe_aero(cmd)[:28]
+        aero_display.append(f"{k:<24} {c}")
+
+    # Filter i3-only
+    i3_display = []
+    skip_i3 = ["pactl", "brightnessctl", "i3status", "i3-nagbar", "wm-cheatsheet"]
+    skip_keys = ["Left", "Right", "Up", "Down", "bracketleft", "bracketright"]
+    for key, cmd in i3_only:
+        if key.startswith("XF86"):
+            continue
+        if any(s in cmd for s in skip_i3):
+            continue
+        if any(s in key for s in skip_keys):
+            continue
+        if re.match(r"^Super-\d$", key):
+            continue
+        if re.match(r"^Super-Shift-\d$", key):
+            continue
+        k = format_key_i3(key)[:24]
+        c = describe_i3(cmd)[:28]
+        i3_display.append(f"{k:<24} {c}")
+
+    for i in range(max(len(aero_display), len(i3_display))):
+        a = aero_display[i] if i < len(aero_display) else ""
+        b = i3_display[i] if i < len(i3_display) else ""
+        right_lines.append(row_right(a, b))
+
+    right_lines.append("-" * RCOL + "-+-" + "-" * RCOL)
+    right_lines.append(row_right(f"{B}Service Mode:{R} Alt+Shift+;", f"{B}Resize Mode:{R} Super+r"))
+    right_lines.append("-" * RCOL + "-+-" + "-" * RCOL)
+
+    aero_service = aero_bindings.get("service", {})
+    i3_resize = i3_bindings.get("resize", {})
+
+    svc = [(k, v.split()[0] if isinstance(v, str) else "multi") for k, v in list(aero_service.items())[:5]]
+    rsz = [(k, v.split()[0]) for k, v in list(i3_resize.items())[:5] if not k.startswith("$")]
+
+    for i in range(max(len(svc), len(rsz))):
+        left = f"  {svc[i][0]}: {svc[i][1]}" if i < len(svc) else ""
+        right = f"  {rsz[i][0]}: {rsz[i][1]}" if i < len(rsz) else ""
+        right_lines.append(row_right(left, right))
+
+    # Combine columns
+    lines = []
+    lines.append(f"{B}{C}WM CHEAT SHEET{R}  {D}[{current_wm.upper()}]{R}")
+    lines.append("=" * TOTAL_W)
+
+    max_rows = max(len(left_lines), len(right_lines))
+    for i in range(max_rows):
+        left = left_lines[i] if i < len(left_lines) else ""
+        right = right_lines[i] if i < len(right_lines) else ""
+        lines.append(pad(left, LEFT_W) + " | " + right)
+
+    lines.append("=" * TOTAL_W)
+    lines.append(f"{D}Press any key to close...{R}")
+
+    return "\n".join(lines)
+
+
+def main():
+    width, height = get_terminal_size()
+
+    # Find config files
+    aero_config = AEROSPACE_CONFIG if AEROSPACE_CONFIG.exists() else AEROSPACE_CONFIG_ALT
+    i3_config = I3_CONFIG if I3_CONFIG.exists() else I3_CONFIG_ALT
+
+    # Parse configs
+    aero_bindings = parse_aerospace_config(aero_config)
+    i3_bindings = parse_i3_config(i3_config)
+
+    # Render and display
+    output = render_cheatsheet(aero_bindings, i3_bindings, width, height)
+    print(output)
+
+    # Wait for keypress
+    try:
+        import tty
+        import termios
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+    except:
+        input()
+
+
+if __name__ == "__main__":
+    main()
