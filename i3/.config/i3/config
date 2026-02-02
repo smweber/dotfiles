@@ -39,7 +39,7 @@ exec_always --no-startup-id ~/.config/polybar/launch.sh
 exec_always --no-startup-id feh --bg-scale ~/.wallpaper.jpg
 
 # Get light/dark mode setting from Cinnamon config
-exec --no-startup-id /usr/libexec/csd-xsettings
+exec_always --no-startup-id killall csd-xsettings; /usr/libexec/csd-xsettings &
 
 # Use pactl to adjust volume in PulseAudio.
 set $refresh_i3status killall -SIGUSR1 i3status
