@@ -45,9 +45,9 @@ automatically-unhide-macos-hidden-apps = false
 # even when they are invisible.
 # This config version is only available since 'config-version = 2'
 # Fallback value (if you omit the key): persistent-workspaces = []
-persistent-workspaces = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B",
-                         "C", "D", "E", "F", "G", "I", "M", "N", "O", "P", "Q",
-                         "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
+#persistent-workspaces = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B",
+#                         "C", "D", "E", "F", "G", "I", "M", "N", "O", "P", "Q",
+#                         "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
 
 # A callback that runs every time binding mode changes
 # See: https://nikitabobko.github.io/AeroSpace/guide#binding-modes
@@ -208,14 +208,6 @@ on-mode-changed = []
     # See: https://nikitabobko.github.io/AeroSpace/commands#mode
     alt-shift-semicolon = 'mode service'
 
-    # WM cheat sheet
-    alt-shift-slash = '''exec-and-forget osascript -e '
-        tell application "Terminal"
-            do script "~/.dotfiles/bin/wm-cheatsheet; exit"
-            activate
-        end tell'
-    '''
-
 # 'service' binding mode declaration.
 # See: https://nikitabobko.github.io/AeroSpace/guide#binding-modes
 [mode.service.binding]
@@ -231,9 +223,3 @@ on-mode-changed = []
     alt-shift-j = ['join-with down', 'mode main']
     alt-shift-k = ['join-with up', 'mode main']
     alt-shift-l = ['join-with right', 'mode main']
-
-# Float the cheat sheet window
-[[on-window-detected]]
-if.app-id = 'com.apple.Terminal'
-if.window-title-regex-substring = 'wm-cheatsheet'
-run = 'layout floating'
