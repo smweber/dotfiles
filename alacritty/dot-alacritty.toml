@@ -1,9 +1,3 @@
-live_config_reload = true
-
-# catppuccin for dark, catppuccin_light for light
-import = [
-    "~/.config/alacritty/themes/themes/catppuccin.toml"
-]
 
 [env]
 TERM = "xterm-256color"
@@ -34,3 +28,11 @@ dynamic_padding = true
 [window.padding]
 x = 5
 y = 5
+
+[general]
+live_config_reload = true
+
+# catppuccin for dark, catppuccin_light for light
+import = [
+    "~/.config/alacritty/themes/themes/catppuccin.toml"
+]
