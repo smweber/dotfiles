@@ -1,5 +1,7 @@
 #!/bin/sh
 # Toggle dark and light themes for tmux, Alacritty, and Neovim on macOS and Linux.
+# On Linux with a graphical session (Cinnamon/GNOME), also switches the desktop theme.
+# On headless Linux, tracks state in a file.
 
 ALACRITTY_LIGHTTHEME="catppuccin_latte.toml"
 ALACRITTY_DARKTHEME="catppuccin.toml"
@@ -10,43 +12,49 @@ TMUX_DARKTHEME="@catppuccin_flavour 'frappe'"
 VIMCONF="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/init.lua"
 ALACRITTYCONF="$HOME/.alacritty.toml"
 TMUXCONF="$HOME/.tmux.conf"
-THEME_MODE_FILE="$HOME/.theme_mode" # File to store current theme mode on Linux
+THEME_MODE_FILE="$HOME/.theme_mode"
 
 # Get the actual files (follow symlinks)
 REAL_ALACRITTYCONF=$(readlink -f "$ALACRITTYCONF" 2>/dev/null || echo "$ALACRITTYCONF")
 REAL_VIMCONF=$(readlink -f "$VIMCONF" 2>/dev/null || echo "$VIMCONF")
 REAL_TMUXCONF=$(readlink -f "$TMUXCONF" 2>/dev/null || echo "$TMUXCONF")
 
-# Function to switch macOS interface theme
+OS_TYPE=$(uname)
+HAS_DISPLAY=false
+[ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ] && HAS_DISPLAY=true
+
+# --- OS/desktop theme switching ---
+
 switch_macos_theme() {
   osascript -e 'tell app "System Events" to tell appearance preferences to set dark mode to not dark mode'
 }
 
-# Function to switch theme in Neovim panes inside tmux
-switch_vim_theme() {
-  theme_for_vim_panes="$1"
-  tmux list-panes -a -F '#{pane_id} #{pane_current_command}' |
-    grep -E 'nvim|vim' | # this captures vim and nvim
-    cut -d ' ' -f 1 |
-    xargs -I PANE tmux send-keys -t PANE Escape \
-      ":set background=${theme_for_vim_panes}" Enter
+switch_linux_desktop_dark() {
+  dconf write /org/gnome/desktop/interface/color-scheme "'prefer-dark'"
+  gsettings set org.cinnamon.desktop.wm.preferences theme Mint-Y-Dark
+  gsettings set org.cinnamon.desktop.interface gtk-theme Mint-Y-Dark
+  gsettings set org.cinnamon.theme name Mint-Y-Dark
+  notify-send "Switched to dark mode"
 }
 
-# Determine OS type
-OS_TYPE=$(uname)
+switch_linux_desktop_light() {
+  dconf write /org/gnome/desktop/interface/color-scheme "'prefer-light'"
+  gsettings set org.cinnamon.desktop.wm.preferences theme Mint-Y
+  gsettings set org.cinnamon.desktop.interface gtk-theme Mint-Y
+  gsettings set org.cinnamon.theme name Mint-Y
+  notify-send "Switched to light mode"
+}
 
-# Check current theme mode
-if [ "$OS_TYPE" = "Darwin" ]; then
-  CURRENT_MODE=$(osascript -e 'tell app "System Events" to tell appearance preferences to return dark mode')
-else
-  if [ -f "$THEME_MODE_FILE" ]; then
-    CURRENT_MODE=$(cat "$THEME_MODE_FILE")
-  else
-    CURRENT_MODE="false" # Default to light theme if file does not exist
-  fi
-fi
+# --- Shared helpers ---
 
-# Function to use GNU sed or macOS sed
+switch_vim_theme() {
+  tmux list-panes -a -F '#{pane_id} #{pane_current_command}' |
+    grep -E 'nvim|vim' |
+    cut -d ' ' -f 1 |
+    xargs -I PANE tmux send-keys -t PANE Escape \
+      ":set background=$1" Enter
+}
+
 update_sed() {
   if [ "$OS_TYPE" = "Darwin" ]; then
     sed -i '' "$@"
@@ -55,17 +63,42 @@ update_sed() {
   fi
 }
 
-# Toggle logic based on current mode
-if [ "$CURRENT_MODE" = "true" ]; then
-  [ "$OS_TYPE" = "Darwin" ] && switch_macos_theme
-  [ "$OS_TYPE" != "Darwin" ] && echo "false" > "$THEME_MODE_FILE" # Update theme mode file on Linux
+# --- Detect current mode ---
+
+if [ "$OS_TYPE" = "Darwin" ]; then
+  IS_DARK=$(osascript -e 'tell app "System Events" to tell appearance preferences to return dark mode')
+elif [ "$HAS_DISPLAY" = true ]; then
+  case "$(gsettings get org.cinnamon.desktop.interface gtk-theme 2>/dev/null)" in
+    *Dark*) IS_DARK="true" ;;
+    *)      IS_DARK="false" ;;
+  esac
+else
+  # Headless Linux: fall back to state file
+  IS_DARK=$(cat "$THEME_MODE_FILE" 2>/dev/null || echo "false")
+fi
+
+# --- Toggle ---
+
+if [ "$IS_DARK" = "true" ]; then
+  # Switch to light
+  if [ "$OS_TYPE" = "Darwin" ]; then
+    switch_macos_theme
+  elif [ "$HAS_DISPLAY" = true ]; then
+    switch_linux_desktop_light
+  fi
+  echo "false" > "$THEME_MODE_FILE"
   [ -f "$REAL_ALACRITTYCONF" ] && update_sed "s/${ALACRITTY_DARKTHEME}/${ALACRITTY_LIGHTTHEME}/" "$REAL_ALACRITTYCONF"
   update_sed "s/${TMUX_DARKTHEME}/${TMUX_LIGHTTHEME}/" "$REAL_TMUXCONF"
   update_sed "s/vim.opt.background = 'dark'/vim.opt.background = 'light'/" "$REAL_VIMCONF"
   switch_vim_theme "light"
 else
-  [ "$OS_TYPE" = "Darwin" ] && switch_macos_theme
-  [ "$OS_TYPE" != "Darwin" ] && echo "true" > "$THEME_MODE_FILE" # Update theme mode file on Linux
+  # Switch to dark
+  if [ "$OS_TYPE" = "Darwin" ]; then
+    switch_macos_theme
+  elif [ "$HAS_DISPLAY" = true ]; then
+    switch_linux_desktop_dark
+  fi
+  echo "true" > "$THEME_MODE_FILE"
   [ -f "$REAL_ALACRITTYCONF" ] && update_sed "s/${ALACRITTY_LIGHTTHEME}/${ALACRITTY_DARKTHEME}/" "$REAL_ALACRITTYCONF"
   update_sed "s/${TMUX_LIGHTTHEME}/${TMUX_DARKTHEME}/" "$REAL_TMUXCONF"
   update_sed "s/vim.opt.background = 'light'/vim.opt.background = 'dark'/" "$REAL_VIMCONF"
