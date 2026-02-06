@@ -1,0 +1,178 @@
+#!/bin/sh
+# Manage an autossh tunnel to scottdev3 with port forwards and VNC connection.
+
+SSH_HOST="scottdev3"
+FORWARD_PORTS="3000 5901 8080 9222"
+AUTOSSH_PATTERN="autossh.*${SSH_HOST}"
+MOSH_SERVER="/home/linuxbrew/.linuxbrew/bin/mosh-server"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
+
+OS_TYPE=$(uname)
+
+msg_ok()   { printf "${GREEN}%s${NC}\n" "$1"; }
+msg_warn() { printf "${YELLOW}%s${NC}\n" "$1"; }
+msg_err()  { printf "${RED}%s${NC}\n" "$1"; }
+
+is_running() {
+  pgrep -f "$AUTOSSH_PATTERN" > /dev/null 2>&1
+}
+
+get_pid() {
+  pgrep -f "$AUTOSSH_PATTERN"
+}
+
+build_forwards() {
+  forwards=""
+  for port in $FORWARD_PORTS; do
+    forwards="$forwards -L ${port}:localhost:${port}"
+  done
+  echo "$forwards"
+}
+
+do_start() {
+  if is_running; then
+    msg_warn "Tunnel already running (PID $(get_pid))"
+    return 0
+  fi
+
+  forwards=$(build_forwards)
+  # shellcheck disable=SC2086
+  autossh -M 0 -N -f \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    $forwards \
+    "$SSH_HOST"
+
+  if is_running; then
+    msg_ok "Tunnel started (PID $(get_pid))"
+    printf "  Forwarding ports:"
+    for port in $FORWARD_PORTS; do
+      printf " %s" "$port"
+    done
+    printf "\n"
+  else
+    msg_err "Failed to start tunnel"
+    return 1
+  fi
+}
+
+do_stop() {
+  if ! is_running; then
+    msg_warn "No tunnel running"
+    return 0
+  fi
+
+  pid=$(get_pid)
+  pkill -f "$AUTOSSH_PATTERN"
+  sleep 0.5
+  if is_running; then
+    msg_err "Failed to stop tunnel"
+    return 1
+  fi
+  msg_ok "Tunnel stopped (was PID $pid)"
+}
+
+do_connect() {
+  if [ "$OS_TYPE" = "Darwin" ]; then
+    open "vnc://localhost:5901"
+  else
+    if command -v gvncviewer > /dev/null 2>&1; then
+      gvncviewer localhost:1
+    else
+      msg_err "gvncviewer not found; install with: apt install gvncviewer"
+      return 1
+    fi
+  fi
+}
+
+check_ports() {
+  for port in $FORWARD_PORTS; do
+    if [ "$OS_TYPE" = "Darwin" ]; then
+      listening=$(lsof -iTCP:"$port" -sTCP:LISTEN -P -n 2>/dev/null | grep -c LISTEN)
+    else
+      listening=$(ss -tlnp 2>/dev/null | grep -c ":${port} ")
+    fi
+    if [ "$listening" -gt 0 ]; then
+      printf "  ${GREEN}%-6s listening${NC}\n" "$port"
+    else
+      printf "  ${RED}%-6s not listening${NC}\n" "$port"
+    fi
+  done
+}
+
+do_status() {
+  if is_running; then
+    pid=$(get_pid)
+    msg_ok "Tunnel is running (PID $pid)"
+
+    # Show uptime if /proc is available
+    if [ -d "/proc/$pid" ]; then
+      elapsed=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+      if [ -n "$elapsed" ]; then
+        hours=$((elapsed / 3600))
+        minutes=$(( (elapsed % 3600) / 60 ))
+        seconds=$((elapsed % 60))
+        printf "  Uptime: %dh %dm %ds\n" "$hours" "$minutes" "$seconds"
+      fi
+    elif [ "$OS_TYPE" = "Darwin" ]; then
+      start_time=$(ps -o lstart= -p "$pid" 2>/dev/null)
+      if [ -n "$start_time" ]; then
+        printf "  Started: %s\n" "$start_time"
+      fi
+    fi
+
+    printf "  Port status:\n"
+    check_ports
+  else
+    msg_err "Tunnel is not running"
+  fi
+}
+
+do_help() {
+  cat <<EOF
+Usage: devtunnel [command]
+
+Commands:
+  (none)    Show tunnel status (default)
+  start     Start the tunnel
+  stop      Stop the tunnel
+  status    Show tunnel status and port info
+  vnc       Start tunnel if needed, then connect VNC
+  mosh      Connect to $SSH_HOST via mosh
+  help      Show this help message
+
+Forwards ports $FORWARD_PORTS to $SSH_HOST.
+EOF
+}
+
+case "${1:-status}" in
+  start)
+    do_start
+    ;;
+  stop)
+    do_stop
+    ;;
+  status)
+    do_status
+    ;;
+  vnc)
+    do_start
+    do_connect
+    ;;
+  mosh)
+    mosh --server="$MOSH_SERVER" "$SSH_HOST"
+    ;;
+  help|--help|-h)
+    do_help
+    ;;
+  *)
+    msg_err "Unknown command: $1"
+    do_help
+    exit 1
+    ;;
+esac
