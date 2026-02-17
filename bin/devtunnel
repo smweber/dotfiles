@@ -45,6 +45,7 @@ do_start() {
   autossh -M 0 -N -f \
     -o ServerAliveInterval=30 \
     -o ServerAliveCountMax=3 \
+    -o ExitOnForwardFailure=yes \
     $forwards \
     "$SSH_HOST"
 
@@ -69,6 +70,7 @@ do_stop() {
 
   pid=$(get_pid)
   pkill -f "$AUTOSSH_PATTERN"
+  pkill -f "ssh.*${SSH_HOST}"
   sleep 0.5
   if is_running; then
     msg_err "Failed to stop tunnel"
@@ -161,8 +163,7 @@ case "${1:-status}" in
     do_status
     ;;
   vnc)
-    do_start
-    do_connect
+    do_start && do_connect
     ;;
   mosh)
     mosh --server="$MOSH_SERVER" "$SSH_HOST"
