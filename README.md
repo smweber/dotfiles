@@ -70,3 +70,17 @@ Installed by the bootstrap script:
 - font-meslo-lg-nerd-font
 
 Linux GUI: i3-wm, rofi, feh, polybar, brightnessctl
+
+## Agent Workspace Artifacts
+
+`bin/agent.sh` can seed build artifacts between JJ workspaces.
+
+- Manifest path: `~/src/agent-workspaces/<repo>/agent-artifacts`
+- Format: one repo-relative path per line (for example `build` or `target`)
+- Behavior:
+  - On first workspace create/switch in a repo, the manifest is auto-created with detected defaults.
+  - When creating or switching to a workspace, missing listed paths are copied from the current workspace.
+- Controls:
+  - `agent artifacts disable` / `agent artifacts enable` (persistent per-repo opt-out/opt-in)
+  - `agent artifacts clean [workspace]` (remove configured artifact paths from current or named workspace)
+  - `AGENT_DISABLE_ARTIFACT_HYDRATION=1` (one-shot opt-out for a single command)

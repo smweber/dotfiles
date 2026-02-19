@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_NAME="${0##*/}"
 AGENT_WORKSPACE_ROOT="${AGENT_WORKSPACE_ROOT:-$HOME/src/agent-workspaces}"
 PARENT_MARKER=".jj/working_copy/agent-parent-root"
+ARTIFACT_MANIFEST_NAME="agent-artifacts"
+ARTIFACTS_DISABLED_MARKER=".agent-artifacts-disabled"
 SCRIPT_PATH="${BASH_SOURCE[0]}"
 if command -v readlink >/dev/null 2>&1; then
   _resolved_script_path="$(readlink -f "$SCRIPT_PATH" 2>/dev/null || true)"
@@ -19,6 +21,7 @@ Usage:
   $SCRIPT_NAME claude <workspace-name> [claude args...]
   $SCRIPT_NAME fish <workspace-name> [fish args...]
   $SCRIPT_NAME switch [workspace-name]
+  $SCRIPT_NAME artifacts [status|enable|disable|opt-in|opt-out|clean] [workspace-name]
   $SCRIPT_NAME cleanup
   $SCRIPT_NAME status [--compact] [--no-color]
   $SCRIPT_NAME help
@@ -27,6 +30,12 @@ Behavior:
   - In a jj repo root, 'codex', 'claude', or 'fish' creates a workspace at:
       $AGENT_WORKSPACE_ROOT/<repo>/<workspace-name>
     then launches the chosen agent from that workspace.
+  - Build artifacts listed in:
+      $AGENT_WORKSPACE_ROOT/<repo>/$ARTIFACT_MANIFEST_NAME
+    are copied into a destination workspace when missing.
+    On first use in a repo, this file is auto-created with detected defaults.
+  - Use 'artifacts disable' to opt out for this repo, 'artifacts enable' to opt in,
+    and 'artifacts clean [workspace]' to remove configured artifact paths.
   - In a workspace, 'cleanup' requires a clean working copy, then forgets and
     deletes the workspace created by this script.
   - In a jj repo or workspace, 'switch' moves to an existing workspace.
@@ -108,6 +117,333 @@ canonicalize_path() {
     cd "$path" >/dev/null 2>&1
     pwd -P
   )
+}
+
+repo_workspace_parent_dir() {
+  local repo_root="$1" repo_name marker_path parent
+  repo_root="$(canonicalize_path "$repo_root" || true)"
+  if [[ -z "$repo_root" ]]; then
+    return 1
+  fi
+
+  marker_path="$repo_root/$PARENT_MARKER"
+  if [[ -f "$marker_path" ]]; then
+    parent="$(head -n 1 "$marker_path" || true)"
+    if [[ -n "$parent" && -d "$parent" ]]; then
+      parent="$(canonicalize_path "$parent" || true)"
+      if [[ -n "$parent" ]]; then
+        repo_name="$(basename "$parent")"
+        printf '%s\n' "$AGENT_WORKSPACE_ROOT/$repo_name"
+        return 0
+      fi
+    fi
+  fi
+
+  repo_name="$(basename "$repo_root")"
+  printf '%s\n' "$AGENT_WORKSPACE_ROOT/$repo_name"
+}
+
+artifact_manifest_path_for_repo_root() {
+  local repo_root="$1"
+  printf '%s/%s\n' "$(repo_workspace_parent_dir "$repo_root")" "$ARTIFACT_MANIFEST_NAME"
+}
+
+artifact_disabled_marker_path_for_repo_root() {
+  local repo_root="$1"
+  printf '%s/%s\n' "$(repo_workspace_parent_dir "$repo_root")" "$ARTIFACTS_DISABLED_MARKER"
+}
+
+artifact_hydration_enabled_for_repo_root() {
+  local repo_root="$1" disabled_marker
+
+  if [[ "${AGENT_DISABLE_ARTIFACT_HYDRATION:-0}" == "1" ]]; then
+    return 1
+  fi
+
+  disabled_marker="$(artifact_disabled_marker_path_for_repo_root "$repo_root")"
+  if [[ -f "$disabled_marker" ]]; then
+    return 1
+  fi
+
+  return 0
+}
+
+artifact_path_is_safe() {
+  local rel_path="$1"
+  [[ -n "$rel_path" ]] || return 1
+  [[ "$rel_path" != /* ]] || return 1
+  [[ "$rel_path" != "~"* ]] || return 1
+
+  case "$rel_path" in
+    "."|".."|./*|../*|*/.|*/./*|*/..|*/../*|*//*)
+      return 1
+      ;;
+  esac
+
+  return 0
+}
+
+detect_default_artifact_paths() {
+  local repo_root="$1" candidate
+  local -A seen=()
+  local -a candidates=()
+
+  if [[ -f "$repo_root/gleam.toml" ]]; then
+    candidates+=("build")
+    seen["build"]=1
+  fi
+
+  if [[ -f "$repo_root/go.mod" ]]; then
+    if [[ -z "${seen[.go-build]:-}" ]]; then
+      candidates+=(".go-build")
+      seen[".go-build"]=1
+    fi
+    if [[ -z "${seen[bin]:-}" ]]; then
+      candidates+=("bin")
+      seen["bin"]=1
+    fi
+  fi
+
+  if [[ -f "$repo_root/Cargo.toml" && -z "${seen[target]:-}" ]]; then
+    candidates+=("target")
+    seen["target"]=1
+  fi
+
+  if [[ ( -f "$repo_root/mix.exs" || -f "$repo_root/rebar.config" || -f "$repo_root/rebar.config.script" ) && -z "${seen[_build]:-}" ]]; then
+    candidates+=("_build")
+    seen["_build"]=1
+  fi
+
+  if [[ -f "$repo_root/package.json" ]]; then
+    for candidate in .next .nuxt .svelte-kit .turbo .vite dist build; do
+      if [[ -d "$repo_root/$candidate" && -z "${seen[$candidate]:-}" ]]; then
+        candidates+=("$candidate")
+        seen["$candidate"]=1
+      fi
+    done
+  fi
+
+  if [[ -f "$repo_root/CMakeLists.txt" && -z "${seen[build]:-}" ]]; then
+    candidates+=("build")
+    seen["build"]=1
+  fi
+
+  for candidate in build dist target _build out; do
+    if [[ -d "$repo_root/$candidate" && -z "${seen[$candidate]:-}" ]]; then
+      candidates+=("$candidate")
+      seen["$candidate"]=1
+    fi
+  done
+
+  printf '%s\n' "${candidates[@]}"
+}
+
+ensure_artifact_manifest() {
+  local repo_root="$1" manifest_path manifest_parent candidate
+  local -a detected_paths=()
+
+  manifest_path="$(artifact_manifest_path_for_repo_root "$repo_root")"
+  if [[ -f "$manifest_path" ]]; then
+    return 0
+  fi
+
+  manifest_parent="$(dirname "$manifest_path")"
+  mkdir -p "$manifest_parent"
+
+  while IFS= read -r candidate; do
+    [[ -z "$candidate" ]] && continue
+    detected_paths+=("$candidate")
+  done < <(detect_default_artifact_paths "$repo_root")
+
+  {
+    echo "# agent.sh artifact paths for $(basename "$repo_root")"
+    echo "# One relative path per line. Blank lines and lines starting with # are ignored."
+    echo "# Paths are copied from the current workspace into a destination workspace when missing."
+    if [[ "${#detected_paths[@]}" -eq 0 ]]; then
+      echo "# No default artifact paths were detected. Add your own entries, for example:"
+      echo "# build"
+      echo "# target"
+    else
+      printf '%s\n' "${detected_paths[@]}"
+    fi
+  } > "$manifest_path"
+
+  if [[ "${#detected_paths[@]}" -eq 0 ]]; then
+    echo "Info: initialized artifact manifest with no detected paths: $manifest_path" >&2
+  else
+    echo "Info: initialized artifact manifest: $manifest_path" >&2
+  fi
+}
+
+artifact_paths_from_manifest() {
+  local manifest_path="$1" line rel_path
+  [[ -f "$manifest_path" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    rel_path="${line#"${line%%[![:space:]]*}"}"
+    rel_path="${rel_path%"${rel_path##*[![:space:]]}"}"
+
+    [[ -z "$rel_path" ]] && continue
+    [[ "$rel_path" == \#* ]] && continue
+
+    if ! artifact_path_is_safe "$rel_path"; then
+      echo "Info: ignoring unsafe artifact path '$rel_path' in $manifest_path" >&2
+      continue
+    fi
+
+    printf '%s\n' "$rel_path"
+  done < "$manifest_path"
+}
+
+copy_artifact_path() {
+  local source_path="$1" destination_path="$2"
+
+  cp -a --reflink=auto "$source_path" "$destination_path" 2>/dev/null || cp -a "$source_path" "$destination_path"
+}
+
+hydrate_workspace_artifacts() {
+  local source_root="$1" destination_root="$2"
+  local manifest_path rel_path source_path destination_path
+  local -a copied_paths=()
+
+  if [[ -z "$source_root" || -z "$destination_root" ]]; then
+    return 0
+  fi
+
+  if [[ ! -d "$source_root" || ! -d "$destination_root" ]]; then
+    return 0
+  fi
+
+  source_root="$(canonicalize_path "$source_root" || true)"
+  destination_root="$(canonicalize_path "$destination_root" || true)"
+  if [[ -z "$source_root" || -z "$destination_root" || "$source_root" == "$destination_root" ]]; then
+    return 0
+  fi
+
+  if ! artifact_hydration_enabled_for_repo_root "$source_root"; then
+    return 0
+  fi
+
+  ensure_artifact_manifest "$source_root"
+  manifest_path="$(artifact_manifest_path_for_repo_root "$source_root")"
+  if [[ ! -f "$manifest_path" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r rel_path; do
+    [[ -z "$rel_path" ]] && continue
+    source_path="$source_root/$rel_path"
+    destination_path="$destination_root/$rel_path"
+
+    if [[ ! -e "$source_path" ]]; then
+      continue
+    fi
+
+    if [[ -e "$destination_path" ]]; then
+      continue
+    fi
+
+    mkdir -p "$(dirname "$destination_path")"
+    if copy_artifact_path "$source_path" "$destination_path"; then
+      copied_paths+=("$rel_path")
+    else
+      echo "Info: failed to copy artifact path '$rel_path' into '$destination_root'" >&2
+    fi
+  done < <(artifact_paths_from_manifest "$manifest_path")
+
+  if [[ "${#copied_paths[@]}" -gt 0 ]]; then
+    echo "Info: copied artifact paths into $(basename "$destination_root"): ${copied_paths[*]}" >&2
+  fi
+}
+
+run_artifacts_command() {
+  local action workspace_name repo_root workspace_dir manifest_path disabled_marker
+  local rel_path target_path
+  local -a removed_paths=()
+
+  action="${1:-status}"
+  workspace_name="${2:-}"
+
+  if [[ $# -gt 2 ]]; then
+    print_error "'artifacts' accepts at most action and optional workspace name."
+  fi
+
+  if ! in_jj_repo; then
+    print_error "'artifacts' must be run from inside a jj repo or workspace."
+  fi
+
+  repo_root="$(workspace_root || true)"
+  if [[ -z "$repo_root" ]]; then
+    print_error "Unable to determine workspace root."
+  fi
+
+  manifest_path="$(artifact_manifest_path_for_repo_root "$repo_root")"
+  disabled_marker="$(artifact_disabled_marker_path_for_repo_root "$repo_root")"
+
+  case "$action" in
+    status)
+      echo "Artifact hydration: $(artifact_hydration_enabled_for_repo_root "$repo_root" && echo enabled || echo disabled)"
+      echo "Manifest: $manifest_path"
+      if [[ -f "$manifest_path" ]]; then
+        echo "Configured paths:"
+        while IFS= read -r rel_path; do
+          [[ -n "$rel_path" ]] && echo "  - $rel_path"
+        done < <(artifact_paths_from_manifest "$manifest_path")
+      else
+        echo "Configured paths: (manifest missing)"
+      fi
+      ;;
+    disable|opt-out)
+      mkdir -p "$(dirname "$disabled_marker")"
+      : > "$disabled_marker"
+      echo "Artifact hydration disabled for repo. Marker: $disabled_marker"
+      ;;
+    enable|opt-in)
+      rm -f -- "$disabled_marker"
+      echo "Artifact hydration enabled for repo."
+      echo "Manifest: $manifest_path"
+      ;;
+    clean)
+      if [[ -n "$workspace_name" ]]; then
+        if ! workspace_exists "$workspace_name"; then
+          print_error "Workspace '$workspace_name' does not exist in this repo."
+        fi
+        workspace_dir="$(workspace_path_for_name "$workspace_name" || true)"
+        if [[ -z "$workspace_dir" ]]; then
+          print_error "Unable to locate workspace directory for '$workspace_name'."
+        fi
+      else
+        workspace_dir="$(workspace_root || true)"
+      fi
+
+      if [[ -z "$workspace_dir" || ! -d "$workspace_dir" ]]; then
+        print_error "Unable to determine workspace directory to clean."
+      fi
+
+      if [[ ! -f "$manifest_path" ]]; then
+        echo "No manifest found at $manifest_path. Nothing to clean."
+        return 0
+      fi
+
+      while IFS= read -r rel_path; do
+        [[ -z "$rel_path" ]] && continue
+        target_path="$workspace_dir/$rel_path"
+        if [[ -e "$target_path" ]]; then
+          rm -rf -- "$target_path"
+          removed_paths+=("$rel_path")
+        fi
+      done < <(artifact_paths_from_manifest "$manifest_path")
+
+      if [[ "${#removed_paths[@]}" -eq 0 ]]; then
+        echo "No configured artifact paths found in $workspace_dir."
+      else
+        echo "Removed artifact paths from $workspace_dir: ${removed_paths[*]}"
+      fi
+      ;;
+    *)
+      print_error "Unsupported artifacts action '$action'. Use status|enable|disable|opt-in|opt-out|clean."
+      ;;
+  esac
 }
 
 process_cwd() {
@@ -552,7 +888,7 @@ create_workspace() {
     print_error "Workspace name '$workspace_name' already exists in this repo."
   fi
 
-  repo_name="$(basename "$root")"
+  repo_name="$(basename "$(repo_workspace_parent_dir "$root")")"
   workspace_dir="$AGENT_WORKSPACE_ROOT/$repo_name/$workspace_name"
 
   mkdir -p "$AGENT_WORKSPACE_ROOT/$repo_name"
@@ -562,6 +898,7 @@ create_workspace() {
 
   jj workspace add --name "$workspace_name" "$workspace_dir" >&2
   printf '%s\n' "$root" > "$workspace_dir/$PARENT_MARKER"
+  hydrate_workspace_artifacts "$root" "$workspace_dir"
 
   if command -v mise >/dev/null 2>&1; then
     (
@@ -713,7 +1050,7 @@ pick_workspace_interactive() {
 }
 
 resolve_switch_target() {
-  local workspace_name workspace_dir running_agents
+  local workspace_name workspace_dir running_agents current_root
   workspace_name="${1:-}"
 
   if ! in_jj_repo; then
@@ -734,6 +1071,11 @@ resolve_switch_target() {
   workspace_dir="$(workspace_path_for_name "$workspace_name" || true)"
   if [[ -z "$workspace_dir" ]]; then
     print_error "Unable to locate workspace directory for '$workspace_name'."
+  fi
+
+  current_root="$(workspace_root || true)"
+  if [[ -n "$current_root" ]]; then
+    hydrate_workspace_artifacts "$current_root" "$workspace_dir"
   fi
 
   running_agents="$(running_agents_for_workspace_root "$workspace_dir")"
@@ -969,8 +1311,10 @@ function __agent_existing_workspaces
     command jj workspace list --template 'name ++ "\n"' 2>/dev/null
 end
 
-set -l __agent_subcommands codex claude fish switch cleanup status help
+  set -l __agent_subcommands codex claude fish switch artifacts cleanup status help
+  set -l __agent_artifact_actions status enable disable opt-in opt-out clean
 
+complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_jj_repo" -a artifacts -d "Manage artifact hydration"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a codex -d "Create workspace and launch Codex"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a claude -d "Create workspace and launch Claude Code"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a fish -d "Create workspace and launch Fish shell"
@@ -980,8 +1324,10 @@ complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; 
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a help -d "Show help"
 complete -c agent -f -n "__fish_seen_subcommand_from status" -l compact -d "Compact status output"
 complete -c agent -f -n "__fish_seen_subcommand_from status" -l no-color -d "Disable color in status output"
+complete -c agent -f -n "__fish_seen_subcommand_from artifacts; and test (count (commandline -opc)) -eq 3" -a "\$__agent_artifact_actions"
 
 complete -c agent -f -n "__fish_seen_subcommand_from codex claude fish switch; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"
+complete -c agent -f -n "__fish_seen_subcommand_from artifacts; and test (count (commandline -opc)) -eq 4" -a "(__agent_existing_workspaces)"
 FISH
 }
 
@@ -1051,7 +1397,7 @@ _agent_complete() {
   cmd="${COMP_WORDS[1]:-}"
 
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=( $(compgen -W "codex claude fish switch cleanup status help" -- "$cur") )
+    COMPREPLY=( $(compgen -W "codex claude fish switch artifacts cleanup status help" -- "$cur") )
     return 0
   fi
 
@@ -1067,6 +1413,21 @@ _agent_complete() {
   if [[ "$cmd" == "status" ]]; then
     COMPREPLY=( $(compgen -W "--compact --no-color" -- "$cur") )
     return 0
+  fi
+
+  if [[ "$cmd" == "artifacts" ]]; then
+    if [[ $COMP_CWORD -eq 2 ]]; then
+      COMPREPLY=( $(compgen -W "status enable disable opt-in opt-out clean" -- "$cur") )
+      return 0
+    fi
+    if [[ $COMP_CWORD -eq 3 && "${COMP_WORDS[2]:-}" == "clean" ]]; then
+      if command -v jj >/dev/null 2>&1; then
+        local workspaces
+        workspaces="$(jj workspace list --template 'name ++ "\n"' 2>/dev/null)"
+        COMPREPLY=( $(compgen -W "$workspaces" -- "$cur") )
+      fi
+      return 0
+    fi
   fi
 }
 
@@ -1142,6 +1503,7 @@ _agent() {
     'claude:Create workspace and launch Claude Code'
     'fish:Create workspace and launch Fish shell'
     'switch:Switch to existing workspace'
+    'artifacts:Manage artifact hydration'
     'cleanup:Forget and delete current managed workspace'
     'status:Show JJ workspace status'
     'help:Show help'
@@ -1164,6 +1526,20 @@ _agent() {
 
   if [[ "${words[2]}" == "status" ]]; then
     compadd -- --compact --no-color
+    return
+  fi
+
+  if [[ "${words[2]}" == "artifacts" ]]; then
+    if (( CURRENT == 3 )); then
+      compadd -- status enable disable opt-in opt-out clean
+      return
+    fi
+    if [[ "${words[3]}" == "clean" ]] && (( CURRENT == 4 )); then
+      if (( $+commands[jj] )); then
+        workspaces=("${(@f)$(jj workspace list --template 'name ++ "\n"' 2>/dev/null)}")
+        compadd -a workspaces
+      fi
+    fi
     return
   fi
 }
@@ -1334,6 +1710,9 @@ main() {
       ;;
     status)
       run_status "${@:2}"
+      ;;
+    artifacts)
+      run_artifacts_command "${@:2}"
       ;;
     cleanup)
       if [[ $# -ne 1 ]]; then
