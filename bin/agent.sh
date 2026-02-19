@@ -17,12 +17,13 @@ print_help() {
 Usage:
   $SCRIPT_NAME codex <workspace-name> [codex args...]
   $SCRIPT_NAME claude <workspace-name> [claude args...]
+  $SCRIPT_NAME fish <workspace-name> [fish args...]
   $SCRIPT_NAME cleanup
   $SCRIPT_NAME status [--compact] [--no-color]
   $SCRIPT_NAME help
 
 Behavior:
-  - In a jj repo root, 'codex' or 'claude' creates a workspace at:
+  - In a jj repo root, 'codex', 'claude', or 'fish' creates a workspace at:
       $AGENT_WORKSPACE_ROOT/<repo>/<workspace-name>
     then launches the chosen agent from that workspace.
   - In a workspace, 'cleanup' requires a clean working copy, then forgets and
@@ -559,6 +560,13 @@ create_workspace() {
   jj workspace add --name "$workspace_name" "$workspace_dir" >&2
   printf '%s\n' "$root" > "$workspace_dir/$PARENT_MARKER"
 
+  if command -v mise >/dev/null 2>&1; then
+    (
+      cd "$workspace_dir"
+      mise trust
+    ) >&2
+  fi
+
   printf '%s\n' "$workspace_dir"
 }
 
@@ -712,7 +720,7 @@ function agent --description "Manage jj workspaces for coding agents"
     end
 
     if test (count \$argv) -ge 1
-        if contains -- "\$argv[1]" codex claude
+        if contains -- "\$argv[1]" codex claude fish
             if test (count \$argv) -lt 2
                 echo "agent: missing workspace name for \$argv[1]" >&2
                 return 1
@@ -765,17 +773,18 @@ function __agent_existing_workspaces
     command jj workspace list --template 'name ++ "\n"' 2>/dev/null
 end
 
-set -l __agent_subcommands codex claude cleanup status help
+set -l __agent_subcommands codex claude fish cleanup status help
 
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a codex -d "Create workspace and launch Codex"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a claude -d "Create workspace and launch Claude Code"
+complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a fish -d "Create workspace and launch Fish shell"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_managed_workspace" -a cleanup -d "Forget and delete current managed workspace"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_jj_repo" -a status -d "Show JJ workspace status"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a help -d "Show help"
 complete -c agent -f -n "__fish_seen_subcommand_from status" -l compact -d "Compact status output"
 complete -c agent -f -n "__fish_seen_subcommand_from status" -l no-color -d "Disable color in status output"
 
-complete -c agent -f -n "__fish_seen_subcommand_from codex claude; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"
+complete -c agent -f -n "__fish_seen_subcommand_from codex claude fish; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"
 FISH
 }
 
@@ -793,7 +802,7 @@ agent() {
     return 1
   fi
 
-  if [[ "${1:-}" == "codex" || "${1:-}" == "claude" ]]; then
+  if [[ "${1:-}" == "codex" || "${1:-}" == "claude" || "${1:-}" == "fish" ]]; then
     local agent_cmd workspace_name workspace_dir
     agent_cmd="${1:-}"
     workspace_name="${2:-}"
@@ -838,11 +847,11 @@ _agent_complete() {
   cmd="${COMP_WORDS[1]:-}"
 
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=( $(compgen -W "codex claude cleanup status help" -- "$cur") )
+    COMPREPLY=( $(compgen -W "codex claude fish cleanup status help" -- "$cur") )
     return 0
   fi
 
-  if [[ $COMP_CWORD -eq 2 && ( "$cmd" == "codex" || "$cmd" == "claude" ) ]]; then
+  if [[ $COMP_CWORD -eq 2 && ( "$cmd" == "codex" || "$cmd" == "claude" || "$cmd" == "fish" ) ]]; then
     if command -v jj >/dev/null 2>&1; then
       local workspaces
       workspaces="$(jj workspace list --template 'name ++ "\n"' 2>/dev/null)"
@@ -875,7 +884,7 @@ agent() {
     return 1
   fi
 
-  if [[ "${1:-}" == "codex" || "${1:-}" == "claude" ]]; then
+  if [[ "${1:-}" == "codex" || "${1:-}" == "claude" || "${1:-}" == "fish" ]]; then
     local agent_cmd workspace_name workspace_dir
     agent_cmd="${1:-}"
     workspace_name="${2:-}"
@@ -920,6 +929,7 @@ _agent() {
   subcommands=(
     'codex:Create workspace and launch Codex'
     'claude:Create workspace and launch Claude Code'
+    'fish:Create workspace and launch Fish shell'
     'cleanup:Forget and delete current managed workspace'
     'status:Show JJ workspace status'
     'help:Show help'
@@ -930,7 +940,7 @@ _agent() {
     return
   fi
 
-  if [[ "${words[2]}" == "codex" || "${words[2]}" == "claude" ]]; then
+  if [[ "${words[2]}" == "codex" || "${words[2]}" == "claude" || "${words[2]}" == "fish" ]]; then
     if (( CURRENT == 3 )); then
       if (( $+commands[jj] )); then
         workspaces=("${(@f)$(jj workspace list --template 'name ++ "\n"' 2>/dev/null)}")
@@ -1107,7 +1117,7 @@ main() {
       fi
       cleanup_workspace
       ;;
-    codex|claude)
+    codex|claude|fish)
       if [[ $# -lt 2 ]]; then
         print_error "Missing workspace name for '$cmd'."
       fi
