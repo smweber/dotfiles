@@ -2,7 +2,7 @@
 # Manage an autossh tunnel to scottdev3 with port forwards and VNC connection.
 
 SSH_HOST="scottdev3"
-FORWARD_PORTS="3000 5901 8080 9222"
+FORWARD_PORTS="3000 3001 3002 3003 3004 3005 3006 3007 3008 3009 3010 5901 8080 9222"
 AUTOSSH_PATTERN="autossh.*${SSH_HOST}"
 MOSH_SERVER="/home/linuxbrew/.linuxbrew/bin/mosh-server"
 
