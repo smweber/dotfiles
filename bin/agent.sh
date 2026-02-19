@@ -18,7 +18,7 @@ Usage:
   $SCRIPT_NAME codex <workspace-name> [codex args...]
   $SCRIPT_NAME claude <workspace-name> [claude args...]
   $SCRIPT_NAME cleanup
-  $SCRIPT_NAME status
+  $SCRIPT_NAME status [--compact] [--no-color]
   $SCRIPT_NAME help
 
 Behavior:
@@ -27,7 +27,9 @@ Behavior:
     then launches the chosen agent from that workspace.
   - In a workspace, 'cleanup' requires a clean working copy, then forgets and
     deletes the workspace created by this script.
-  - In a jj repo or workspace, 'status' lists workspaces and marks the current one.
+  - In a jj repo or workspace, 'status' shows each workspace, marks the current one,
+    reports non-empty commits diverged from 'default', and lists running agents.
+    Options: --compact (single-line rows), --no-color (disable ANSI colors).
   - With no args in a jj repo/workspace, defaults to 'status' and prints this help.
 HELP
 
@@ -73,48 +75,428 @@ print_error() {
 }
 
 in_jj_repo() {
-  jj root >/dev/null 2>&1
+  jj --ignore-working-copy root >/dev/null 2>&1
 }
 
 workspace_root() {
-  jj workspace root 2>/dev/null
+  jj --ignore-working-copy workspace root 2>/dev/null
 }
 
 current_workspace_name() {
   local current_commit line name commit
 
-  current_commit="$(jj log -r @ --no-graph -T 'commit_id ++ "\n"' 2>/dev/null || true)"
+  current_commit="$(jj --ignore-working-copy log -r @ --no-graph -T 'commit_id ++ "\n"' 2>/dev/null || true)"
   if [[ -n "$current_commit" ]]; then
     while IFS=$'\t' read -r name commit; do
       if [[ -n "$name" && "$commit" == "$current_commit" ]]; then
         printf '%s\n' "$name"
         return 0
       fi
-    done < <(jj workspace list --template 'name ++ "\t" ++ target.commit_id() ++ "\n"' 2>/dev/null)
+    done < <(jj --ignore-working-copy workspace list --template 'name ++ "\t" ++ target.commit_id() ++ "\n"' 2>/dev/null)
   fi
 
-  jj log -r @ --no-graph -T 'working_copies.map(|w| w.name()).join(" ")' 2>/dev/null | awk '{print $1}'
+  jj --ignore-working-copy log -r @ --no-graph -T 'working_copies.map(|w| w.name()).join(" ")' 2>/dev/null | awk '{print $1}'
+}
+
+canonicalize_path() {
+  local path="$1"
+  (
+    cd "$path" >/dev/null 2>&1
+    pwd -P
+  )
+}
+
+process_cwd() {
+  local pid="$1" cwd
+
+  if [[ -L "/proc/$pid/cwd" ]]; then
+    cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+    if [[ -n "$cwd" && -d "$cwd" ]]; then
+      printf '%s\n' "$cwd"
+      return 0
+    fi
+  fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    cwd="$(
+      lsof -a -d cwd -p "$pid" -Fn 2>/dev/null \
+        | awk '/^n/ {print substr($0, 2); exit}'
+    )"
+    if [[ -n "$cwd" && -d "$cwd" ]]; then
+      printf '%s\n' "$cwd"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+append_unique_csv() {
+  local existing="$1" value="$2"
+
+  if [[ -z "$existing" ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  case ",$existing," in
+    *",$value,"*)
+      printf '%s\n' "$existing"
+      ;;
+    *)
+      printf '%s, %s\n' "$existing" "$value"
+      ;;
+  esac
+}
+
+count_diverged_nonempty_commits() {
+  local workspace_commit="$1" default_commit="$2" count
+
+  count="$(
+    jj --ignore-working-copy log -r "(::${workspace_commit} ~ ::${default_commit}) & ~empty()" \
+      --no-graph \
+      -T '"1\n"' \
+      2>/dev/null \
+      | wc -l \
+      | tr -d '[:space:]'
+  )"
+  printf '%s\n' "${count:-0}"
 }
 
 run_status() {
+  local status_compact status_no_color
+  status_compact=0
+  status_no_color=0
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --compact)
+        status_compact=1
+        ;;
+      --no-color)
+        status_no_color=1
+        ;;
+      *)
+        print_error "Unsupported option for 'status': $1"
+        ;;
+    esac
+    shift
+  done
+
   if ! in_jj_repo; then
     print_error "'status' must be run from inside a jj repo or workspace."
   fi
 
-  local current line name repo_root
-  repo_root="$(jj root)"
+  local current repo_root i default_commit default_workspace_found unknown_agents
+  local name commit_short empty_state commit_id workspace_root cwd pid agent_name
+  local marker changes_label agents_label
+  local name_width commit_width state_width changes_width agents_width
+  local header_cur header_name header_commit header_state header_changes header_agents
+  local cur_cell name_cell commit_cell state_cell changes_cell agents_cell
+  local row_cur row_name row_commit row_state row_changes row_agents separator
+  local use_color c_reset c_bold c_dim c_green c_yellow c_red c_cyan c_blue
+  local -a workspace_names=() workspace_commit_shorts=() workspace_empty_states=() workspace_commit_ids=()
+  local -a workspace_roots=() workspace_changes=() workspace_agents=()
+
+  use_color=0
+  c_reset=""
+  c_bold=""
+  c_dim=""
+  c_green=""
+  c_yellow=""
+  c_red=""
+  c_cyan=""
+  c_blue=""
+  if [[ "$status_no_color" -eq 0 && -t 1 && -z "${NO_COLOR:-}" && "${TERM:-}" != "dumb" ]]; then
+    use_color=1
+    c_reset=$'\033[0m'
+    c_bold=$'\033[1m'
+    c_dim=$'\033[2m'
+    c_green=$'\033[32m'
+    c_yellow=$'\033[33m'
+    c_red=$'\033[31m'
+    c_cyan=$'\033[36m'
+    c_blue=$'\033[34m'
+  fi
+
+  repo_root="$(jj --ignore-working-copy root)"
   current="$(current_workspace_name || true)"
 
-  echo "Workspaces for $repo_root:"
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    name="${line%%:*}"
-    if [[ -n "$current" && "$name" == "$current" ]]; then
-      printf '* %s\n' "$line"
-    else
-      printf '  %s\n' "$line"
+  while IFS=$'\t' read -r name commit_short empty_state commit_id; do
+    [[ -z "$name" ]] && continue
+    workspace_names+=("$name")
+    workspace_commit_shorts+=("$commit_short")
+    workspace_empty_states+=("$empty_state")
+    workspace_commit_ids+=("$commit_id")
+  done < <(
+    jj --ignore-working-copy workspace list \
+      --template 'name ++ "\t" ++ target.commit_id().short(8) ++ "\t" ++ if(target.empty(), "empty", "non-empty") ++ "\t" ++ target.commit_id() ++ "\n"'
+  )
+
+  if [[ "${#workspace_names[@]}" -eq 0 ]]; then
+    echo "Workspaces for $repo_root:"
+    echo "  (none)"
+    return 0
+  fi
+
+  default_workspace_found=0
+  default_commit=""
+
+  for ((i = 0; i < ${#workspace_names[@]}; i++)); do
+    name="${workspace_names[$i]}"
+    if [[ "$name" == "default" ]]; then
+      default_workspace_found=1
+      default_commit="${workspace_commit_ids[$i]}"
     fi
-  done < <(jj workspace list)
+
+    workspace_root="$(jj --ignore-working-copy workspace root --name "$name" 2>/dev/null || true)"
+    if [[ -n "$workspace_root" ]]; then
+      workspace_root="$(canonicalize_path "$workspace_root" || true)"
+    fi
+    workspace_roots+=("$workspace_root")
+  done
+
+  for ((i = 0; i < ${#workspace_names[@]}; i++)); do
+    if [[ "$default_workspace_found" -ne 1 ]]; then
+      workspace_changes+=("unknown (no default workspace)")
+      continue
+    fi
+
+    name="${workspace_names[$i]}"
+    if [[ "$name" == "default" ]]; then
+      workspace_changes+=("base")
+      continue
+    fi
+
+    changes_label="$(count_diverged_nonempty_commits "${workspace_commit_ids[$i]}" "$default_commit")"
+    if [[ "$changes_label" == "0" ]]; then
+      workspace_changes+=("clean")
+    elif [[ "$changes_label" == "1" ]]; then
+      workspace_changes+=("1 non-empty commit")
+    else
+      workspace_changes+=("$changes_label non-empty commits")
+    fi
+  done
+
+  for ((i = 0; i < ${#workspace_names[@]}; i++)); do
+    workspace_agents+=("")
+  done
+
+  unknown_agents=0
+  while IFS=$'\t' read -r pid agent_name; do
+    [[ -z "$pid" || -z "$agent_name" ]] && continue
+    cwd="$(process_cwd "$pid" || true)"
+    if [[ -z "$cwd" ]]; then
+      unknown_agents=$((unknown_agents + 1))
+      continue
+    fi
+
+    cwd="$(canonicalize_path "$cwd" || true)"
+    [[ -z "$cwd" ]] && continue
+
+    for ((i = 0; i < ${#workspace_names[@]}; i++)); do
+      workspace_root="${workspace_roots[$i]}"
+      [[ -z "$workspace_root" ]] && continue
+      if [[ "$cwd" == "$workspace_root" || "$cwd" == "$workspace_root/"* ]]; then
+        workspace_agents[$i]="$(append_unique_csv "${workspace_agents[$i]}" "$agent_name")"
+      fi
+    done
+  done < <(ps -eo pid=,comm= | awk '$2=="codex" || $2=="claude" {print $1 "\t" $2}')
+
+  echo "Workspaces for $repo_root:"
+
+  if [[ "$status_compact" -eq 1 ]]; then
+    for ((i = 0; i < ${#workspace_names[@]}; i++)); do
+      name="${workspace_names[$i]}"
+      if [[ -n "$current" && "$name" == "$current" ]]; then
+        marker='*'
+      else
+        marker=' '
+      fi
+
+      agents_label="${workspace_agents[$i]}"
+      if [[ -z "$agents_label" ]]; then
+        agents_label="none"
+      fi
+
+      row_cur="$marker"
+      row_name="$name"
+      row_state="${workspace_empty_states[$i]}"
+      row_changes="${workspace_changes[$i]}"
+      row_agents="$agents_label"
+
+      if [[ "$use_color" -eq 1 ]]; then
+        if [[ "$marker" == "*" ]]; then
+          row_cur="${c_green}${c_bold}${marker}${c_reset}"
+          row_name="${c_cyan}${c_bold}${name}${c_reset}"
+        fi
+
+        if [[ "${workspace_empty_states[$i]}" == "empty" ]]; then
+          row_state="${c_dim}${workspace_empty_states[$i]}${c_reset}"
+        else
+          row_state="${c_yellow}${workspace_empty_states[$i]}${c_reset}"
+        fi
+
+        case "${workspace_changes[$i]}" in
+          clean)
+            row_changes="${c_green}${workspace_changes[$i]}${c_reset}"
+            ;;
+          base)
+            row_changes="${c_cyan}${workspace_changes[$i]}${c_reset}"
+            ;;
+          unknown*)
+            row_changes="${c_red}${workspace_changes[$i]}${c_reset}"
+            ;;
+          *)
+            row_changes="${c_yellow}${workspace_changes[$i]}${c_reset}"
+            ;;
+        esac
+
+        if [[ "$agents_label" == "none" ]]; then
+          row_agents="${c_dim}${agents_label}${c_reset}"
+        else
+          row_agents="${c_blue}${agents_label}${c_reset}"
+        fi
+      fi
+
+      printf '  %s %s: %s (%s) | changes: %s | agents: %s\n' \
+        "$row_cur" \
+        "$row_name" \
+        "${workspace_commit_shorts[$i]}" \
+        "$row_state" \
+        "$row_changes" \
+        "$row_agents"
+    done
+
+    if [[ "$unknown_agents" -gt 0 ]]; then
+      if [[ "$use_color" -eq 1 ]]; then
+        echo "  ${c_dim}note: $unknown_agents detected codex/claude process(es) could not be mapped to a workspace (process inspection permission denied).${c_reset}"
+      else
+        echo "  note: $unknown_agents detected codex/claude process(es) could not be mapped to a workspace (process inspection permission denied)."
+      fi
+    fi
+    return 0
+  fi
+
+  name_width=9
+  commit_width=8
+  state_width=5
+  changes_width=18
+  agents_width=14
+  for ((i = 0; i < ${#workspace_names[@]}; i++)); do
+    name="${workspace_names[$i]}"
+    commit_short="${workspace_commit_shorts[$i]}"
+    empty_state="${workspace_empty_states[$i]}"
+    changes_label="${workspace_changes[$i]}"
+    agents_label="${workspace_agents[$i]}"
+    [[ -z "$agents_label" ]] && agents_label="none"
+
+    (( ${#name} > name_width )) && name_width=${#name}
+    (( ${#commit_short} > commit_width )) && commit_width=${#commit_short}
+    (( ${#empty_state} > state_width )) && state_width=${#empty_state}
+    (( ${#changes_label} > changes_width )) && changes_width=${#changes_label}
+    (( ${#agents_label} > agents_width )) && agents_width=${#agents_label}
+  done
+
+  printf -v header_cur "%-3s" "CUR"
+  printf -v header_name "%-*s" "$name_width" "WORKSPACE"
+  printf -v header_commit "%-*s" "$commit_width" "COMMIT"
+  printf -v header_state "%-*s" "$state_width" "STATE"
+  printf -v header_changes "%-*s" "$changes_width" "CHANGES VS DEFAULT"
+  printf -v header_agents "%-*s" "$agents_width" "RUNNING AGENTS"
+  printf '  %s  %s  %s  %s  %s  %s\n' \
+    "${c_bold}${header_cur}${c_reset}" \
+    "${c_bold}${header_name}${c_reset}" \
+    "${c_bold}${header_commit}${c_reset}" \
+    "${c_bold}${header_state}${c_reset}" \
+    "${c_bold}${header_changes}${c_reset}" \
+    "${c_bold}${header_agents}${c_reset}"
+
+  printf -v separator '%*s' $((3 + name_width + commit_width + state_width + changes_width + agents_width + 10)) ''
+  separator="${separator// /-}"
+  if [[ "$use_color" -eq 1 ]]; then
+    printf '  %s%s%s\n' "$c_dim" "$separator" "$c_reset"
+  else
+    printf '  %s\n' "$separator"
+  fi
+
+  for ((i = 0; i < ${#workspace_names[@]}; i++)); do
+    name="${workspace_names[$i]}"
+    if [[ -n "$current" && "$name" == "$current" ]]; then
+      marker='*'
+    else
+      marker=' '
+    fi
+
+    agents_label="${workspace_agents[$i]}"
+    if [[ -z "$agents_label" ]]; then
+      agents_label="none"
+    fi
+
+    printf -v cur_cell "%-3s" "$marker"
+    printf -v name_cell "%-*s" "$name_width" "$name"
+    printf -v commit_cell "%-*s" "$commit_width" "${workspace_commit_shorts[$i]}"
+    printf -v state_cell "%-*s" "$state_width" "${workspace_empty_states[$i]}"
+    printf -v changes_cell "%-*s" "$changes_width" "${workspace_changes[$i]}"
+    printf -v agents_cell "%-*s" "$agents_width" "$agents_label"
+
+    row_cur="$cur_cell"
+    row_name="$name_cell"
+    row_commit="$commit_cell"
+    row_state="$state_cell"
+    row_changes="$changes_cell"
+    row_agents="$agents_cell"
+
+    if [[ "$use_color" -eq 1 ]]; then
+      if [[ "$marker" == "*" ]]; then
+        row_cur="${c_green}${c_bold}${cur_cell}${c_reset}"
+        row_name="${c_cyan}${c_bold}${name_cell}${c_reset}"
+      fi
+
+      if [[ "${workspace_empty_states[$i]}" == "empty" ]]; then
+        row_state="${c_dim}${state_cell}${c_reset}"
+      else
+        row_state="${c_yellow}${state_cell}${c_reset}"
+      fi
+
+      case "${workspace_changes[$i]}" in
+        clean)
+          row_changes="${c_green}${changes_cell}${c_reset}"
+          ;;
+        base)
+          row_changes="${c_cyan}${changes_cell}${c_reset}"
+          ;;
+        unknown*)
+          row_changes="${c_red}${changes_cell}${c_reset}"
+          ;;
+        *)
+          row_changes="${c_yellow}${changes_cell}${c_reset}"
+          ;;
+      esac
+
+      if [[ "$agents_label" == "none" ]]; then
+        row_agents="${c_dim}${agents_cell}${c_reset}"
+      else
+        row_agents="${c_blue}${agents_cell}${c_reset}"
+      fi
+    fi
+
+    printf '  %s  %s  %s  %s  %s  %s\n' \
+      "$row_cur" \
+      "$row_name" \
+      "$row_commit" \
+      "$row_state" \
+      "$row_changes" \
+      "$row_agents"
+  done
+
+  if [[ "$unknown_agents" -gt 0 ]]; then
+    if [[ "$use_color" -eq 1 ]]; then
+      echo "  ${c_dim}note: $unknown_agents detected codex/claude process(es) could not be mapped to a workspace (process inspection permission denied).${c_reset}"
+    else
+      echo "  note: $unknown_agents detected codex/claude process(es) could not be mapped to a workspace (process inspection permission denied)."
+    fi
+  fi
 }
 
 ensure_clean_workspace() {
@@ -388,8 +770,10 @@ set -l __agent_subcommands codex claude cleanup status help
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a codex -d "Create workspace and launch Codex"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a claude -d "Create workspace and launch Claude Code"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_managed_workspace" -a cleanup -d "Forget and delete current managed workspace"
-complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_jj_repo" -a status -d "List JJ workspaces"
+complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_jj_repo" -a status -d "Show JJ workspace status"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a help -d "Show help"
+complete -c agent -f -n "__fish_seen_subcommand_from status" -l compact -d "Compact status output"
+complete -c agent -f -n "__fish_seen_subcommand_from status" -l no-color -d "Disable color in status output"
 
 complete -c agent -f -n "__fish_seen_subcommand_from codex claude; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"
 FISH
@@ -466,6 +850,11 @@ _agent_complete() {
     fi
     return 0
   fi
+
+  if [[ "$cmd" == "status" ]]; then
+    COMPREPLY=( $(compgen -W "--compact --no-color" -- "$cur") )
+    return 0
+  fi
 }
 
 complete -o default -F _agent_complete agent
@@ -532,7 +921,7 @@ _agent() {
     'codex:Create workspace and launch Codex'
     'claude:Create workspace and launch Claude Code'
     'cleanup:Forget and delete current managed workspace'
-    'status:List JJ workspaces'
+    'status:Show JJ workspace status'
     'help:Show help'
   )
 
@@ -548,6 +937,12 @@ _agent() {
         compadd -a workspaces
       fi
     fi
+    return
+  fi
+
+  if [[ "${words[2]}" == "status" ]]; then
+    compadd -- --compact --no-color
+    return
   fi
 }
 
@@ -704,10 +1099,7 @@ main() {
       print_help
       ;;
     status)
-      if [[ $# -ne 1 ]]; then
-        print_error "'status' does not take extra arguments."
-      fi
-      run_status
+      run_status "${@:2}"
       ;;
     cleanup)
       if [[ $# -ne 1 ]]; then

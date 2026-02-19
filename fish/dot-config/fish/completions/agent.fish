@@ -17,7 +17,9 @@ set -l __agent_subcommands codex claude cleanup status help
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a codex -d "Create workspace and launch Codex"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a claude -d "Create workspace and launch Claude Code"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands; and __agent_in_managed_workspace" -a cleanup -d "Forget and delete current managed workspace"
-complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands; and __agent_in_jj_repo" -a status -d "List JJ workspaces"
+complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands; and __agent_in_jj_repo" -a status -d "Show JJ workspace status"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a help -d "Show help"
+complete -c agent -f -n "__fish_seen_subcommand_from status" -l compact -d "Compact status output"
+complete -c agent -f -n "__fish_seen_subcommand_from status" -l no-color -d "Disable color in status output"
 
 complete -c agent -f -n "__fish_seen_subcommand_from codex claude; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"
