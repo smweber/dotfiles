@@ -234,7 +234,7 @@ run_status() {
     workspace_commit_ids+=("$commit_id")
   done < <(
     jj --ignore-working-copy workspace list \
-      --template 'name ++ "\t" ++ target.commit_id().short(8) ++ "\t" ++ if(target.empty(), "empty", "non-empty") ++ "\t" ++ target.commit_id() ++ "\n"'
+      --template 'name ++ "\t" ++ target.change_id().short(8) ++ "\t" ++ if(target.empty(), "empty", "non-empty") ++ "\t" ++ target.commit_id() ++ "\n"'
   )
 
   if [[ "${#workspace_names[@]}" -eq 0 ]]; then
@@ -404,7 +404,7 @@ run_status() {
 
   printf -v header_cur "%-3s" "CUR"
   printf -v header_name "%-*s" "$name_width" "WORKSPACE"
-  printf -v header_commit "%-*s" "$commit_width" "COMMIT"
+  printf -v header_commit "%-*s" "$commit_width" "CHANGE"
   printf -v header_state "%-*s" "$state_width" "STATE"
   printf -v header_changes "%-*s" "$changes_width" "CHANGES VS DEFAULT"
   printf -v header_agents "%-*s" "$agents_width" "RUNNING AGENTS"
