@@ -25,6 +25,17 @@ function agent --description "Manage jj workspaces for coding agents"
             return $status
         end
 
+        if test "$argv[1]" = "switch"
+            set -l workspace_dir (command "$script" switch-target $argv[2..-1])
+            set -l switch_status $status
+            if test $switch_status -ne 0
+                return $switch_status
+            end
+
+            cd "$workspace_dir"
+            return $status
+        end
+
         if test "$argv[1]" = "cleanup"
             set -l parent (command "$script" parent-root 2>/dev/null)
             env AGENT_SUPPRESS_PARENT_NOTE=1 "$script" $argv

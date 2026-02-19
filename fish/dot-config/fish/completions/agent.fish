@@ -12,15 +12,16 @@ function __agent_existing_workspaces
     command jj workspace list --template 'name ++ "\n"' 2>/dev/null
 end
 
-set -l __agent_subcommands codex claude fish cleanup status help
+set -l __agent_subcommands codex claude fish switch cleanup status help
 
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a codex -d "Create workspace and launch Codex"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a claude -d "Create workspace and launch Claude Code"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a fish -d "Create workspace and launch Fish shell"
+complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a switch -d "Switch to an existing workspace"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands; and __agent_in_managed_workspace" -a cleanup -d "Forget and delete current managed workspace"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands; and __agent_in_jj_repo" -a status -d "Show JJ workspace status"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a help -d "Show help"
 complete -c agent -f -n "__fish_seen_subcommand_from status" -l compact -d "Compact status output"
 complete -c agent -f -n "__fish_seen_subcommand_from status" -l no-color -d "Disable color in status output"
 
-complete -c agent -f -n "__fish_seen_subcommand_from codex claude fish; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"
+complete -c agent -f -n "__fish_seen_subcommand_from codex claude fish switch; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"

@@ -18,6 +18,7 @@ Usage:
   $SCRIPT_NAME codex <workspace-name> [codex args...]
   $SCRIPT_NAME claude <workspace-name> [claude args...]
   $SCRIPT_NAME fish <workspace-name> [fish args...]
+  $SCRIPT_NAME switch [workspace-name]
   $SCRIPT_NAME cleanup
   $SCRIPT_NAME status [--compact] [--no-color]
   $SCRIPT_NAME help
@@ -28,6 +29,8 @@ Behavior:
     then launches the chosen agent from that workspace.
   - In a workspace, 'cleanup' requires a clean working copy, then forgets and
     deletes the workspace created by this script.
+  - In a jj repo or workspace, 'switch' moves to an existing workspace.
+    If no workspace name is provided, it prompts you to pick one interactively.
   - In a jj repo or workspace, 'status' shows each workspace, marks the current one,
     reports non-empty commits diverged from 'default', and lists running agents.
     Options: --compact (single-line rows), --no-color (disable ANSI colors).
@@ -570,6 +573,188 @@ create_workspace() {
   printf '%s\n' "$workspace_dir"
 }
 
+workspace_exists() {
+  local workspace_name
+  workspace_name="$1"
+  jj --ignore-working-copy workspace list --template 'name ++ "\n"' | grep -Fxq -- "$workspace_name"
+}
+
+workspace_path_for_name() {
+  local workspace_name workspace_dir current_name
+  workspace_name="$1"
+  workspace_dir="$(jj --ignore-working-copy workspace root --name "$workspace_name" 2>/dev/null || true)"
+
+  if [[ -z "$workspace_dir" ]]; then
+    current_name="$(current_workspace_name || true)"
+    if [[ -n "$current_name" && "$workspace_name" == "$current_name" ]]; then
+      workspace_dir="$(workspace_root || true)"
+    fi
+  fi
+
+  if [[ -z "$workspace_dir" && "$workspace_name" == "default" ]]; then
+    workspace_dir="$(managed_parent_root || true)"
+  fi
+
+  if [[ -z "$workspace_dir" || ! -d "$workspace_dir" ]]; then
+    return 1
+  fi
+  canonicalize_path "$workspace_dir"
+}
+
+running_agents_for_workspace_root() {
+  local target_root pid agent_name cwd agents
+  target_root="$1"
+  agents=""
+
+  if [[ -z "$target_root" ]]; then
+    printf '\n'
+    return 0
+  fi
+
+  target_root="$(canonicalize_path "$target_root" || true)"
+  if [[ -z "$target_root" ]]; then
+    printf '\n'
+    return 0
+  fi
+
+  while IFS=$'\t' read -r pid agent_name; do
+    [[ -z "$pid" || -z "$agent_name" ]] && continue
+    cwd="$(process_cwd "$pid" || true)"
+    [[ -z "$cwd" ]] && continue
+
+    cwd="$(canonicalize_path "$cwd" || true)"
+    [[ -z "$cwd" ]] && continue
+
+    if [[ "$cwd" == "$target_root" || "$cwd" == "$target_root/"* ]]; then
+      agents="$(append_unique_csv "$agents" "$agent_name")"
+    fi
+  done < <(ps -eo pid=,comm= | awk '$2=="codex" || $2=="claude" {print $1 "\t" $2}')
+
+  printf '%s\n' "$agents"
+}
+
+pick_workspace_interactive() {
+  local name root agents label reply
+  local index total use_dev_tty tty_fd
+  local -a workspace_names=() workspace_labels=()
+
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+
+    root="$(workspace_path_for_name "$name" || true)"
+    if [[ -n "$root" ]]; then
+      agents="$(running_agents_for_workspace_root "$root")"
+    else
+      agents=""
+    fi
+
+    if [[ -n "$agents" ]]; then
+      label="$name (running: $agents)"
+    else
+      label="$name (running: none)"
+    fi
+
+    workspace_names+=("$name")
+    workspace_labels+=("$label")
+  done < <(jj --ignore-working-copy workspace list --template 'name ++ "\n"')
+
+  if [[ "${#workspace_names[@]}" -eq 0 ]]; then
+    print_error "No workspaces found in this repo."
+  fi
+
+  use_dev_tty=0
+  tty_fd=""
+  if (exec 3<>/dev/tty) 2>/dev/null && exec {tty_fd}<>/dev/tty 2>/dev/null; then
+    use_dev_tty=1
+  elif [[ ! -t 0 || ! -t 2 ]]; then
+    print_error "No workspace specified and no interactive terminal is available."
+  fi
+
+  total="${#workspace_names[@]}"
+  if [[ "$use_dev_tty" -eq 1 ]]; then
+    printf 'Select workspace to switch to:\n' >&"$tty_fd"
+    for ((index = 0; index < total; index++)); do
+      printf '  %d) %s\n' "$((index + 1))" "${workspace_labels[$index]}" >&"$tty_fd"
+    done
+
+    while true; do
+      printf 'Workspace number: ' >&"$tty_fd"
+      if ! IFS= read -r reply <&"$tty_fd"; then
+        exec {tty_fd}>&-
+        return 1
+      fi
+      if [[ "$reply" =~ ^[0-9]+$ ]] && (( reply >= 1 && reply <= total )); then
+        printf '%s\n' "${workspace_names[$((reply - 1))]}"
+        exec {tty_fd}>&-
+        return 0
+      fi
+      printf 'Invalid selection. Enter a listed number.\n' >&"$tty_fd"
+    done
+  fi
+
+  echo "Select workspace to switch to:" >&2
+  for ((index = 0; index < total; index++)); do
+    printf '  %d) %s\n' "$((index + 1))" "${workspace_labels[$index]}" >&2
+  done
+
+  while true; do
+    printf 'Workspace number: ' >&2
+    if ! IFS= read -r reply; then
+      return 1
+    fi
+    if [[ "$reply" =~ ^[0-9]+$ ]] && (( reply >= 1 && reply <= total )); then
+      printf '%s\n' "${workspace_names[$((reply - 1))]}"
+      return 0
+    fi
+    echo "Invalid selection. Enter a listed number." >&2
+  done
+
+  return 1
+}
+
+resolve_switch_target() {
+  local workspace_name workspace_dir running_agents
+  workspace_name="${1:-}"
+
+  if ! in_jj_repo; then
+    print_error "'switch' must be run from inside a jj repo or workspace."
+  fi
+
+  if [[ -z "$workspace_name" ]]; then
+    workspace_name="$(pick_workspace_interactive || true)"
+    if [[ -z "$workspace_name" ]]; then
+      print_error "No workspace selected."
+    fi
+  fi
+
+  if ! workspace_exists "$workspace_name"; then
+    print_error "Workspace '$workspace_name' does not exist in this repo."
+  fi
+
+  workspace_dir="$(workspace_path_for_name "$workspace_name" || true)"
+  if [[ -z "$workspace_dir" ]]; then
+    print_error "Unable to locate workspace directory for '$workspace_name'."
+  fi
+
+  running_agents="$(running_agents_for_workspace_root "$workspace_dir")"
+  if [[ -n "$running_agents" ]]; then
+    echo "Info: workspace '$workspace_name' has running agent(s): $running_agents" >&2
+  fi
+
+  printf '%s\n' "$workspace_dir"
+}
+
+switch_workspace() {
+  local workspace_name workspace_dir
+  workspace_name="${1:-}"
+  workspace_dir="$(resolve_switch_target "$workspace_name")"
+
+  echo "Switch target: $workspace_dir"
+  if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    echo "Note: this script cannot change your parent shell directory. Run: cd \"$workspace_dir\""
+  fi
+}
+
 cleanup_workspace() {
   if ! in_jj_repo; then
     print_error "'cleanup' must be run from inside a workspace."
@@ -737,6 +922,17 @@ function agent --description "Manage jj workspaces for coding agents"
             return \$status
         end
 
+        if test "\$argv[1]" = "switch"
+            set -l workspace_dir (command "\$script" switch-target \$argv[2..-1])
+            set -l switch_status \$status
+            if test \$switch_status -ne 0
+                return \$switch_status
+            end
+
+            cd "\$workspace_dir"
+            return \$status
+        end
+
         if test "\$argv[1]" = "cleanup"
             set -l parent (command "\$script" parent-root 2>/dev/null)
             env AGENT_SUPPRESS_PARENT_NOTE=1 "\$script" \$argv
@@ -773,18 +969,19 @@ function __agent_existing_workspaces
     command jj workspace list --template 'name ++ "\n"' 2>/dev/null
 end
 
-set -l __agent_subcommands codex claude fish cleanup status help
+set -l __agent_subcommands codex claude fish switch cleanup status help
 
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a codex -d "Create workspace and launch Codex"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a claude -d "Create workspace and launch Claude Code"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a fish -d "Create workspace and launch Fish shell"
+complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a switch -d "Switch to an existing workspace"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_managed_workspace" -a cleanup -d "Forget and delete current managed workspace"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_jj_repo" -a status -d "Show JJ workspace status"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a help -d "Show help"
 complete -c agent -f -n "__fish_seen_subcommand_from status" -l compact -d "Compact status output"
 complete -c agent -f -n "__fish_seen_subcommand_from status" -l no-color -d "Disable color in status output"
 
-complete -c agent -f -n "__fish_seen_subcommand_from codex claude fish; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"
+complete -c agent -f -n "__fish_seen_subcommand_from codex claude fish switch; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"
 FISH
 }
 
@@ -832,6 +1029,13 @@ agent() {
     return $exit_code
   fi
 
+  if [[ "${1:-}" == "switch" ]]; then
+    local workspace_dir
+    workspace_dir="$("$script" switch-target "${@:2}")" || return $?
+    cd "$workspace_dir" || return $?
+    return 0
+  fi
+
   "$script" "$@"
 }
 BASH
@@ -847,11 +1051,11 @@ _agent_complete() {
   cmd="${COMP_WORDS[1]:-}"
 
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=( $(compgen -W "codex claude fish cleanup status help" -- "$cur") )
+    COMPREPLY=( $(compgen -W "codex claude fish switch cleanup status help" -- "$cur") )
     return 0
   fi
 
-  if [[ $COMP_CWORD -eq 2 && ( "$cmd" == "codex" || "$cmd" == "claude" || "$cmd" == "fish" ) ]]; then
+  if [[ $COMP_CWORD -eq 2 && ( "$cmd" == "codex" || "$cmd" == "claude" || "$cmd" == "fish" || "$cmd" == "switch" ) ]]; then
     if command -v jj >/dev/null 2>&1; then
       local workspaces
       workspaces="$(jj workspace list --template 'name ++ "\n"' 2>/dev/null)"
@@ -914,6 +1118,13 @@ agent() {
     return $exit_code
   fi
 
+  if [[ "${1:-}" == "switch" ]]; then
+    local workspace_dir
+    workspace_dir="$("$script" switch-target "${@:2}")" || return $?
+    cd "$workspace_dir" || return $?
+    return 0
+  fi
+
   "$script" "$@"
 }
 ZSH
@@ -930,6 +1141,7 @@ _agent() {
     'codex:Create workspace and launch Codex'
     'claude:Create workspace and launch Claude Code'
     'fish:Create workspace and launch Fish shell'
+    'switch:Switch to existing workspace'
     'cleanup:Forget and delete current managed workspace'
     'status:Show JJ workspace status'
     'help:Show help'
@@ -940,7 +1152,7 @@ _agent() {
     return
   fi
 
-  if [[ "${words[2]}" == "codex" || "${words[2]}" == "claude" || "${words[2]}" == "fish" ]]; then
+  if [[ "${words[2]}" == "codex" || "${words[2]}" == "claude" || "${words[2]}" == "fish" || "${words[2]}" == "switch" ]]; then
     if (( CURRENT == 3 )); then
       if (( $+commands[jj] )); then
         workspaces=("${(@f)$(jj workspace list --template 'name ++ "\n"' 2>/dev/null)}")
@@ -1104,6 +1316,18 @@ main() {
         print_error "'prepare-workspace' expects a workspace name."
       fi
       create_workspace "$2"
+      ;;
+    switch-target)
+      if [[ $# -gt 2 ]]; then
+        print_error "'switch-target' accepts at most one workspace name."
+      fi
+      resolve_switch_target "${2:-}"
+      ;;
+    switch)
+      if [[ $# -gt 2 ]]; then
+        print_error "'switch' accepts at most one workspace name."
+      fi
+      switch_workspace "${2:-}"
       ;;
     help|-h|--help)
       print_help
