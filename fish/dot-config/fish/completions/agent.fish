@@ -18,7 +18,7 @@ end
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands; and __agent_in_jj_repo" -a artifacts -d "Manage artifact hydration"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a codex -d "Create workspace and launch Codex"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a claude -d "Create workspace and launch Claude Code"
-complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a fish -d "Create workspace and launch Fish shell"
+complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a fish -d "Create workspace and switch to it"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands" -a switch -d "Switch to an existing workspace"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands; and __agent_in_jj_repo" -a cleanup -d "Forget and delete a managed workspace"
 complete -c agent -f -n "not __fish_seen_subcommand_from $__agent_subcommands; and __agent_in_jj_repo" -a status -d "Show JJ workspace status"

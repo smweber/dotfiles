@@ -29,7 +29,8 @@ Usage:
 Behavior:
   - In a jj repo root (not inside an existing agent workspace), 'codex', 'claude', or 'fish' creates a workspace at:
       $AGENT_WORKSPACE_ROOT/<repo>/<workspace-name>
-    then launches the chosen agent from that workspace.
+    then 'codex'/'claude' launch from that workspace.
+    'fish' switches to the new workspace in shell wrappers (no nested fish process).
   - Build artifacts listed in:
       $AGENT_WORKSPACE_ROOT/<repo>/$ARTIFACT_MANIFEST_NAME
     are copied into a destination workspace when missing.
@@ -903,6 +904,17 @@ launch_agent_workspace() {
   workspace_name="$2"
   shift 2
 
+  if [[ "$agent_cmd" == "fish" ]]; then
+    workspace_dir="$(create_workspace "$workspace_name")"
+    if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+      echo "Switch target: $workspace_dir"
+      echo "Note: this script cannot change your parent shell directory. Run: cd \"$workspace_dir\""
+      return 0
+    fi
+    cd "$workspace_dir"
+    return 0
+  fi
+
   if ! command -v "$agent_cmd" >/dev/null 2>&1; then
     print_error "Agent command '$agent_cmd' not found in PATH."
   fi
@@ -1454,7 +1466,7 @@ function agent --description "Manage jj workspaces for coding agents"
     end
 
     if test (count \$argv) -ge 1
-        if contains -- "\$argv[1]" codex claude fish
+        if contains -- "\$argv[1]" codex claude
             if test (count \$argv) -lt 2
                 echo "agent: missing workspace name for \$argv[1]" >&2
                 return 1
@@ -1468,6 +1480,22 @@ function agent --description "Manage jj workspaces for coding agents"
 
             cd "\$workspace_dir"
             command "\$argv[1]" \$argv[3..-1]
+            return \$status
+        end
+
+        if test "\$argv[1]" = "fish"
+            if test (count \$argv) -lt 2
+                echo "agent: missing workspace name for \$argv[1]" >&2
+                return 1
+            end
+
+            set -l workspace_dir (command "\$script" prepare-workspace "\$argv[2]")
+            set -l prepare_status \$status
+            if test \$prepare_status -ne 0
+                return \$prepare_status
+            end
+
+            cd "\$workspace_dir"
             return \$status
         end
 
@@ -1525,7 +1553,7 @@ end
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_jj_repo" -a artifacts -d "Manage artifact hydration"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a codex -d "Create workspace and launch Codex"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a claude -d "Create workspace and launch Claude Code"
-complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a fish -d "Create workspace and launch Fish shell"
+complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a fish -d "Create workspace and switch to it"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a switch -d "Switch to an existing workspace"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_jj_repo" -a cleanup -d "Forget and delete a managed workspace"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_jj_repo" -a status -d "Show JJ workspace status"
@@ -1553,7 +1581,7 @@ agent() {
     return 1
   fi
 
-  if [[ "${1:-}" == "codex" || "${1:-}" == "claude" || "${1:-}" == "fish" ]]; then
+  if [[ "${1:-}" == "codex" || "${1:-}" == "claude" ]]; then
     local agent_cmd workspace_name workspace_dir
     agent_cmd="${1:-}"
     workspace_name="${2:-}"
@@ -1568,6 +1596,20 @@ agent() {
     shift 2
     command "$agent_cmd" "$@"
     return $?
+  fi
+
+  if [[ "${1:-}" == "fish" ]]; then
+    local workspace_name workspace_dir
+    workspace_name="${2:-}"
+
+    if [[ -z "$workspace_name" ]]; then
+      echo "agent: missing workspace name for fish" >&2
+      return 1
+    fi
+
+    workspace_dir="$("$script" prepare-workspace "$workspace_name")" || return $?
+    cd "$workspace_dir" || return $?
+    return 0
   fi
 
   if [[ "${1:-}" == "cleanup" ]]; then
@@ -1658,7 +1700,7 @@ agent() {
     return 1
   fi
 
-  if [[ "${1:-}" == "codex" || "${1:-}" == "claude" || "${1:-}" == "fish" ]]; then
+  if [[ "${1:-}" == "codex" || "${1:-}" == "claude" ]]; then
     local agent_cmd workspace_name workspace_dir
     agent_cmd="${1:-}"
     workspace_name="${2:-}"
@@ -1673,6 +1715,20 @@ agent() {
     shift 2
     command "$agent_cmd" "$@"
     return $?
+  fi
+
+  if [[ "${1:-}" == "fish" ]]; then
+    local workspace_name workspace_dir
+    workspace_name="${2:-}"
+
+    if [[ -z "$workspace_name" ]]; then
+      echo "agent: missing workspace name for fish" >&2
+      return 1
+    fi
+
+    workspace_dir="$("$script" prepare-workspace "$workspace_name")" || return $?
+    cd "$workspace_dir" || return $?
+    return 0
   fi
 
   if [[ "${1:-}" == "cleanup" ]]; then
@@ -1711,7 +1767,7 @@ _agent() {
   subcommands=(
     'codex:Create workspace and launch Codex'
     'claude:Create workspace and launch Claude Code'
-    'fish:Create workspace and launch Fish shell'
+    'fish:Create workspace and switch to it'
     'switch:Switch to existing workspace'
     'artifacts:Manage artifact hydration'
     'cleanup:Forget and delete a managed workspace'

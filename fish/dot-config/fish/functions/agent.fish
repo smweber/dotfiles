@@ -8,7 +8,7 @@ function agent --description "Manage jj workspaces for coding agents"
     end
 
     if test (count $argv) -ge 1
-        if contains -- "$argv[1]" codex claude fish
+        if contains -- "$argv[1]" codex claude
             if test (count $argv) -lt 2
                 echo "agent: missing workspace name for $argv[1]" >&2
                 return 1
@@ -22,6 +22,22 @@ function agent --description "Manage jj workspaces for coding agents"
 
             cd "$workspace_dir"
             command "$argv[1]" $argv[3..-1]
+            return $status
+        end
+
+        if test "$argv[1]" = "fish"
+            if test (count $argv) -lt 2
+                echo "agent: missing workspace name for $argv[1]" >&2
+                return 1
+            end
+
+            set -l workspace_dir (command "$script" prepare-workspace "$argv[2]")
+            set -l prepare_status $status
+            if test $prepare_status -ne 0
+                return $prepare_status
+            end
+
+            cd "$workspace_dir"
             return $status
         end
 
