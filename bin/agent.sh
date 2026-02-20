@@ -22,7 +22,7 @@ Usage:
   $SCRIPT_NAME fish <workspace-name> [fish args...]
   $SCRIPT_NAME switch [workspace-name]
   $SCRIPT_NAME artifacts [status|enable|disable|opt-in|opt-out|clean] [workspace-name]
-  $SCRIPT_NAME cleanup
+  $SCRIPT_NAME cleanup [workspace-name]
   $SCRIPT_NAME status [--compact] [--no-color]
   $SCRIPT_NAME help
 
@@ -36,10 +36,12 @@ Behavior:
     On first use in a repo, this file is auto-created with detected defaults.
   - Use 'artifacts disable' to opt out for this repo, 'artifacts enable' to opt in,
     and 'artifacts clean [workspace]' to remove configured artifact paths.
-  - In a workspace, 'cleanup' requires a clean working copy, then forgets and
-    deletes the workspace created by this script.
+  - In a jj repo/workspace, 'cleanup [workspace]' requires a clean working copy,
+    then forgets and deletes a workspace created by this script.
+    If no workspace is provided, it defaults to the current workspace.
   - In a jj repo or workspace, 'switch' moves to an existing workspace.
     You can pass an exact name or a unique case-insensitive prefix/substring.
+    If fzf is installed, no-arg switch uses an fzf picker.
     If no workspace name is provided, it prompts you to pick one interactively.
   - In a jj repo or workspace, 'status' shows each workspace, marks the current one,
     reports non-empty commits diverged from 'default', and lists running agents.
@@ -874,12 +876,25 @@ run_status() {
   echo
 }
 
-ensure_clean_workspace() {
-  local state
-  state="$(jj log -r @ --no-graph -T 'if(empty, "", "dirty") ++ if(conflict, " conflict", "")')"
+ensure_clean_workspace_root() {
+  local workspace_dir state
+  workspace_dir="$1"
+
+  if [[ -z "$workspace_dir" || ! -d "$workspace_dir" ]]; then
+    print_error "Unable to determine workspace path to validate cleanliness."
+  fi
+
+  state="$(
+    cd "$workspace_dir"
+    jj log -r @ --no-graph -T 'if(empty, "", "dirty") ++ if(conflict, " conflict", "")'
+  )"
   if [[ -n "$state" ]]; then
     print_error "Workspace is not clean. Commit, abandon, or resolve conflicts before cleanup."
   fi
+}
+
+ensure_clean_workspace() {
+  ensure_clean_workspace_root "$(workspace_root || true)"
 }
 
 launch_agent_workspace() {
@@ -1095,9 +1110,9 @@ running_agents_for_workspace_root() {
 }
 
 pick_workspace_interactive() {
-  local name root agents label reply resolved_name
+  local name root agents label reply resolved_name selected_entry
   local index total use_dev_tty tty_fd
-  local -a workspace_names=() workspace_labels=()
+  local -a workspace_names=() workspace_labels=() workspace_fzf_entries=()
 
   while IFS= read -r name; do
     [[ -z "$name" ]] && continue
@@ -1117,6 +1132,7 @@ pick_workspace_interactive() {
 
     workspace_names+=("$name")
     workspace_labels+=("$label")
+    workspace_fzf_entries+=("$name"$'\t'"$label")
   done < <(list_workspaces_default_first)
 
   if [[ "${#workspace_names[@]}" -eq 0 ]]; then
@@ -1132,6 +1148,29 @@ pick_workspace_interactive() {
   fi
 
   total="${#workspace_names[@]}"
+
+  if command -v fzf >/dev/null 2>&1; then
+    selected_entry="$(
+      printf '%s\n' "${workspace_fzf_entries[@]}" \
+        | fzf \
+          --delimiter=$'\t' \
+          --with-nth=2 \
+          --no-multi \
+          --height=40% \
+          --reverse \
+          --border \
+          --prompt='Switch workspace> '
+    )" || selected_entry=""
+
+    if [[ -n "$selected_entry" ]]; then
+      if [[ -n "$tty_fd" ]]; then
+        exec {tty_fd}>&-
+      fi
+      printf '%s\n' "${selected_entry%%$'\t'*}"
+      return 0
+    fi
+  fi
+
   if [[ "$use_dev_tty" -eq 1 ]]; then
     printf 'Select workspace to switch to:\n' >&"$tty_fd"
     for ((index = 0; index < total; index++)); do
@@ -1243,35 +1282,58 @@ switch_workspace() {
 }
 
 cleanup_workspace() {
+  local workspace_name current_workspace resolved_name match_status
+  local workspace_dir parent marker_path
+  workspace_name="${1:-}"
+
   if ! in_jj_repo; then
-    print_error "'cleanup' must be run from inside a workspace."
+    print_error "'cleanup' must be run from inside a jj repo or workspace."
   fi
 
-  local root current parent marker_path
-  root="$(workspace_root)"
-  marker_path="$root/$PARENT_MARKER"
+  if [[ -z "$workspace_name" ]]; then
+    current_workspace="$(current_workspace_name || true)"
+    if [[ -z "$current_workspace" ]]; then
+      print_error "Unable to determine current workspace name."
+    fi
+    workspace_name="$current_workspace"
+  elif ! workspace_exists "$workspace_name"; then
+    if resolved_name="$(resolve_workspace_selector "$workspace_name")"; then
+      workspace_name="$resolved_name"
+    else
+      match_status=$?
+      if [[ "$match_status" -eq 2 ]]; then
+        print_error "Workspace selector '$workspace_name' is ambiguous."
+      fi
+      print_error "Workspace '$workspace_name' does not exist in this repo."
+    fi
+  fi
 
+  workspace_dir="$(workspace_path_for_name "$workspace_name" || true)"
+  if [[ -z "$workspace_dir" || ! -d "$workspace_dir" ]]; then
+    print_error "Unable to locate workspace directory for '$workspace_name'."
+  fi
+
+  marker_path="$workspace_dir/$PARENT_MARKER"
   if [[ ! -f "$marker_path" ]]; then
-    print_error "Missing $PARENT_MARKER. Cleanup only supports workspaces created by this script."
+    print_error "Missing $PARENT_MARKER in '$workspace_name'. Cleanup only supports workspaces created by this script."
   fi
 
-  ensure_clean_workspace
-
-  current="$(current_workspace_name || true)"
-  if [[ -z "$current" ]]; then
-    print_error "Unable to determine current workspace name."
-  fi
-
-  parent="$(managed_parent_root || true)"
-  if [[ -z "$parent" ]]; then
+  parent="$(head -n 1 "$marker_path" || true)"
+  if [[ -z "$parent" || ! -d "$parent" ]]; then
     print_error "Parent repo path is missing or invalid in $marker_path"
   fi
+  parent="$(canonicalize_path "$parent" || true)"
+  if [[ -z "$parent" ]]; then
+    print_error "Unable to canonicalize parent repo path from $marker_path"
+  fi
+
+  ensure_clean_workspace_root "$workspace_dir"
 
   cd "$parent"
-  jj workspace forget "$current"
-  rm -rf -- "$root"
+  jj workspace forget "$workspace_name"
+  rm -rf -- "$workspace_dir"
 
-  echo "Cleaned workspace '$current': $root"
+  echo "Cleaned workspace '$workspace_name': $workspace_dir"
   echo "Parent repo: $parent"
   if [[ "${AGENT_SUPPRESS_PARENT_NOTE:-0}" != "1" && "${BASH_SOURCE[0]}" == "$0" ]]; then
     echo "Note: this script cannot change your parent shell directory. Run: cd \"$parent\""
@@ -1422,10 +1484,11 @@ function agent --description "Manage jj workspaces for coding agents"
 
         if test "\$argv[1]" = "cleanup"
             set -l parent (command "\$script" parent-root 2>/dev/null)
+            set -l cwd_before (pwd -P)
             env AGENT_SUPPRESS_PARENT_NOTE=1 "\$script" \$argv
             set -l exit_code \$status
 
-            if test \$exit_code -eq 0; and test -n "\$parent"; and test -d "\$parent"
+            if test \$exit_code -eq 0; and test ! -d "\$cwd_before"; and test -n "\$parent"; and test -d "\$parent"
                 cd "\$parent"
             end
 
@@ -1464,14 +1527,14 @@ complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" 
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a claude -d "Create workspace and launch Claude Code"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a fish -d "Create workspace and launch Fish shell"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a switch -d "Switch to an existing workspace"
-complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_managed_workspace" -a cleanup -d "Forget and delete current managed workspace"
+complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_jj_repo" -a cleanup -d "Forget and delete a managed workspace"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands; and __agent_in_jj_repo" -a status -d "Show JJ workspace status"
 complete -c agent -f -n "not __fish_seen_subcommand_from \$__agent_subcommands" -a help -d "Show help"
 complete -c agent -f -n "__fish_seen_subcommand_from status" -l compact -d "Compact status output"
 complete -c agent -f -n "__fish_seen_subcommand_from status" -l no-color -d "Disable color in status output"
 complete -c agent -f -n "__fish_seen_subcommand_from artifacts; and test (count (commandline -opc)) -eq 3" -a "\$__agent_artifact_actions"
 
-complete -c agent -f -n "__fish_seen_subcommand_from codex claude fish switch; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"
+complete -c agent -f -n "__fish_seen_subcommand_from codex claude fish switch cleanup; and test (count (commandline -opc)) -eq 2" -a "(__agent_existing_workspaces)"
 complete -c agent -f -n "__fish_seen_subcommand_from artifacts; and test (count (commandline -opc)) -eq 4" -a "(__agent_existing_workspaces)"
 FISH
 }
@@ -1508,12 +1571,13 @@ agent() {
   fi
 
   if [[ "${1:-}" == "cleanup" ]]; then
-    local parent exit_code
+    local parent exit_code cwd_before
     parent="$("$script" parent-root 2>/dev/null || true)"
+    cwd_before="$(pwd -P 2>/dev/null || pwd)"
     AGENT_SUPPRESS_PARENT_NOTE=1 "$script" "$@"
     exit_code=$?
 
-    if [[ $exit_code -eq 0 && -n "$parent" && -d "$parent" ]]; then
+    if [[ $exit_code -eq 0 && ! -d "$cwd_before" && -n "$parent" && -d "$parent" ]]; then
       cd "$parent" || return $exit_code
     fi
 
@@ -1546,7 +1610,7 @@ _agent_complete() {
     return 0
   fi
 
-  if [[ $COMP_CWORD -eq 2 && ( "$cmd" == "codex" || "$cmd" == "claude" || "$cmd" == "fish" || "$cmd" == "switch" ) ]]; then
+  if [[ $COMP_CWORD -eq 2 && ( "$cmd" == "codex" || "$cmd" == "claude" || "$cmd" == "fish" || "$cmd" == "switch" || "$cmd" == "cleanup" ) ]]; then
     if command -v jj >/dev/null 2>&1; then
       local workspaces
       workspaces="$(jj workspace list --template 'name ++ "\n"' 2>/dev/null)"
@@ -1612,12 +1676,13 @@ agent() {
   fi
 
   if [[ "${1:-}" == "cleanup" ]]; then
-    local parent exit_code
+    local parent exit_code cwd_before
     parent="$("$script" parent-root 2>/dev/null || true)"
+    cwd_before="$(pwd -P 2>/dev/null || pwd)"
     AGENT_SUPPRESS_PARENT_NOTE=1 "$script" "$@"
     exit_code=$?
 
-    if [[ $exit_code -eq 0 && -n "$parent" && -d "$parent" ]]; then
+    if [[ $exit_code -eq 0 && ! -d "$cwd_before" && -n "$parent" && -d "$parent" ]]; then
       cd "$parent" || return $exit_code
     fi
 
@@ -1649,7 +1714,7 @@ _agent() {
     'fish:Create workspace and launch Fish shell'
     'switch:Switch to existing workspace'
     'artifacts:Manage artifact hydration'
-    'cleanup:Forget and delete current managed workspace'
+    'cleanup:Forget and delete a managed workspace'
     'status:Show JJ workspace status'
     'help:Show help'
   )
@@ -1659,7 +1724,7 @@ _agent() {
     return
   fi
 
-  if [[ "${words[2]}" == "codex" || "${words[2]}" == "claude" || "${words[2]}" == "fish" || "${words[2]}" == "switch" ]]; then
+  if [[ "${words[2]}" == "codex" || "${words[2]}" == "claude" || "${words[2]}" == "fish" || "${words[2]}" == "switch" || "${words[2]}" == "cleanup" ]]; then
     if (( CURRENT == 3 )); then
       if (( $+commands[jj] )); then
         workspaces=("${(@f)$(jj workspace list --template 'name ++ "\n"' 2>/dev/null)}")
@@ -1858,10 +1923,10 @@ main() {
       run_artifacts_command "${@:2}"
       ;;
     cleanup)
-      if [[ $# -ne 1 ]]; then
-        print_error "'cleanup' does not take extra arguments."
+      if [[ $# -gt 2 ]]; then
+        print_error "'cleanup' accepts at most one workspace name."
       fi
-      cleanup_workspace
+      cleanup_workspace "${2:-}"
       ;;
     codex|claude|fish)
       if [[ $# -lt 2 ]]; then

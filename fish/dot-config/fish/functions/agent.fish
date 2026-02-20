@@ -38,10 +38,11 @@ function agent --description "Manage jj workspaces for coding agents"
 
         if test "$argv[1]" = "cleanup"
             set -l parent (command "$script" parent-root 2>/dev/null)
+            set -l cwd_before (pwd -P)
             env AGENT_SUPPRESS_PARENT_NOTE=1 "$script" $argv
             set -l exit_code $status
 
-            if test $exit_code -eq 0; and test -n "$parent"; and test -d "$parent"
+            if test $exit_code -eq 0; and test ! -d "$cwd_before"; and test -n "$parent"; and test -d "$parent"
                 cd "$parent"
             end
 
