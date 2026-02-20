@@ -43,7 +43,7 @@ Behavior:
   - In a jj repo or workspace, 'status' shows each workspace, marks the current one,
     reports non-empty commits diverged from 'default', and lists running agents.
     Options: --compact (single-line rows), --no-color (disable ANSI colors).
-  - With no args in a jj repo/workspace, defaults to 'status' and prints this help.
+  - With no args in a jj repo/workspace, defaults to 'status'.
 HELP
 
   if command -v fish >/dev/null 2>&1 && ! fish_integration_installed; then
@@ -527,7 +527,7 @@ run_status() {
     print_error "'status' must be run from inside a jj repo or workspace."
   fi
 
-  local current repo_root i default_commit default_workspace_found unknown_agents
+  local current repo_root i default_commit default_workspace_found unknown_agents default_index
   local name commit_short empty_state commit_id workspace_root cwd pid agent_name
   local marker changes_label agents_label
   local name_width commit_width state_width changes_width agents_width
@@ -536,6 +536,7 @@ run_status() {
   local row_cur row_name row_commit row_state row_changes row_agents separator
   local use_color c_reset c_bold c_dim c_green c_yellow c_red c_cyan c_blue
   local -a workspace_names=() workspace_commit_shorts=() workspace_empty_states=() workspace_commit_ids=()
+  local -a reordered_workspace_names=() reordered_workspace_commit_shorts=() reordered_workspace_empty_states=() reordered_workspace_commit_ids=()
   local -a workspace_roots=() workspace_changes=() workspace_agents=()
 
   use_color=0
@@ -561,6 +562,7 @@ run_status() {
 
   repo_root="$(jj --ignore-working-copy root)"
   current="$(current_workspace_name || true)"
+  echo
 
   while IFS=$'\t' read -r name commit_short empty_state commit_id; do
     [[ -z "$name" ]] && continue
@@ -576,7 +578,37 @@ run_status() {
   if [[ "${#workspace_names[@]}" -eq 0 ]]; then
     echo "Workspaces for $repo_root:"
     echo "  (none)"
+    echo
     return 0
+  fi
+
+  # jj does not expose workspace creation timestamps directly; preserve jj's list order
+  # and only force the default workspace to the top when present.
+  default_index=-1
+  for ((i = 0; i < ${#workspace_names[@]}; i++)); do
+    if [[ "${workspace_names[$i]}" == "default" ]]; then
+      default_index=$i
+      break
+    fi
+  done
+  if (( default_index > 0 )); then
+    reordered_workspace_names+=("${workspace_names[$default_index]}")
+    reordered_workspace_commit_shorts+=("${workspace_commit_shorts[$default_index]}")
+    reordered_workspace_empty_states+=("${workspace_empty_states[$default_index]}")
+    reordered_workspace_commit_ids+=("${workspace_commit_ids[$default_index]}")
+    for ((i = 0; i < ${#workspace_names[@]}; i++)); do
+      if (( i == default_index )); then
+        continue
+      fi
+      reordered_workspace_names+=("${workspace_names[$i]}")
+      reordered_workspace_commit_shorts+=("${workspace_commit_shorts[$i]}")
+      reordered_workspace_empty_states+=("${workspace_empty_states[$i]}")
+      reordered_workspace_commit_ids+=("${workspace_commit_ids[$i]}")
+    done
+    workspace_names=("${reordered_workspace_names[@]}")
+    workspace_commit_shorts=("${reordered_workspace_commit_shorts[@]}")
+    workspace_empty_states=("${reordered_workspace_empty_states[@]}")
+    workspace_commit_ids=("${reordered_workspace_commit_ids[@]}")
   fi
 
   default_workspace_found=0
@@ -715,6 +747,7 @@ run_status() {
         echo "  note: $unknown_agents detected codex/claude process(es) could not be mapped to a workspace (process inspection permission denied)."
       fi
     fi
+    echo
     return 0
   fi
 
@@ -837,6 +870,7 @@ run_status() {
       echo "  note: $unknown_agents detected codex/claude process(es) could not be mapped to a workspace (process inspection permission denied)."
     fi
   fi
+  echo
 }
 
 ensure_clean_workspace() {
@@ -1626,8 +1660,6 @@ main() {
   if [[ -z "$cmd" ]]; then
     if in_jj_repo; then
       run_status
-      echo
-      print_help
       exit 0
     fi
     print_error "No command provided and current directory is not in a jj repo."
