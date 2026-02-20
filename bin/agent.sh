@@ -39,6 +39,7 @@ Behavior:
   - In a workspace, 'cleanup' requires a clean working copy, then forgets and
     deletes the workspace created by this script.
   - In a jj repo or workspace, 'switch' moves to an existing workspace.
+    You can pass an exact name or a unique case-insensitive prefix/substring.
     If no workspace name is provided, it prompts you to pick one interactively.
   - In a jj repo or workspace, 'status' shows each workspace, marks the current one,
     reports non-empty commits diverged from 'default', and lists running agents.
@@ -959,6 +960,86 @@ workspace_exists() {
   jj --ignore-working-copy workspace list --template 'name ++ "\n"' | grep -Fxq -- "$workspace_name"
 }
 
+list_workspaces_default_first() {
+  local name
+  local -a others=()
+  local default_seen=0
+
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    if [[ "$name" == "default" ]]; then
+      default_seen=1
+      continue
+    fi
+    others+=("$name")
+  done < <(jj --ignore-working-copy workspace list --template 'name ++ "\n"')
+
+  if [[ "$default_seen" -eq 1 ]]; then
+    printf '%s\n' "default"
+  fi
+  if [[ "${#others[@]}" -gt 0 ]]; then
+    printf '%s\n' "${others[@]}"
+  fi
+}
+
+resolve_workspace_selector() {
+  local selector lower_selector name lower_name
+  local -a names=() ci_exact_matches=() prefix_matches=() substring_matches=()
+  selector="$1"
+
+  while IFS= read -r name; do
+    [[ -n "$name" ]] && names+=("$name")
+  done < <(list_workspaces_default_first)
+
+  if [[ "${#names[@]}" -eq 0 ]]; then
+    return 1
+  fi
+
+  for name in "${names[@]}"; do
+    if [[ "$name" == "$selector" ]]; then
+      printf '%s\n' "$name"
+      return 0
+    fi
+  done
+
+  lower_selector="${selector,,}"
+  for name in "${names[@]}"; do
+    lower_name="${name,,}"
+    if [[ "$lower_name" == "$lower_selector" ]]; then
+      ci_exact_matches+=("$name")
+    fi
+    if [[ "$lower_name" == "$lower_selector"* ]]; then
+      prefix_matches+=("$name")
+    fi
+    if [[ "$lower_name" == *"$lower_selector"* ]]; then
+      substring_matches+=("$name")
+    fi
+  done
+
+  if [[ "${#ci_exact_matches[@]}" -eq 1 ]]; then
+    printf '%s\n' "${ci_exact_matches[0]}"
+    return 0
+  fi
+  if [[ "${#prefix_matches[@]}" -eq 1 ]]; then
+    printf '%s\n' "${prefix_matches[0]}"
+    return 0
+  fi
+  if [[ "${#prefix_matches[@]}" -gt 1 ]]; then
+    echo "Ambiguous workspace selector '$selector'. Prefix matches: ${prefix_matches[*]}" >&2
+    return 2
+  fi
+  if [[ "${#substring_matches[@]}" -eq 1 ]]; then
+    printf '%s\n' "${substring_matches[0]}"
+    return 0
+  fi
+  if [[ "${#substring_matches[@]}" -gt 1 ]]; then
+    echo "Ambiguous workspace selector '$selector'. Substring matches: ${substring_matches[*]}" >&2
+    return 2
+  fi
+
+  return 1
+}
+
 workspace_path_for_name() {
   local workspace_name workspace_dir current_name
   workspace_name="$1"
@@ -1014,7 +1095,7 @@ running_agents_for_workspace_root() {
 }
 
 pick_workspace_interactive() {
-  local name root agents label reply
+  local name root agents label reply resolved_name
   local index total use_dev_tty tty_fd
   local -a workspace_names=() workspace_labels=()
 
@@ -1036,7 +1117,7 @@ pick_workspace_interactive() {
 
     workspace_names+=("$name")
     workspace_labels+=("$label")
-  done < <(jj --ignore-working-copy workspace list --template 'name ++ "\n"')
+  done < <(list_workspaces_default_first)
 
   if [[ "${#workspace_names[@]}" -eq 0 ]]; then
     print_error "No workspaces found in this repo."
@@ -1058,7 +1139,7 @@ pick_workspace_interactive() {
     done
 
     while true; do
-      printf 'Workspace number: ' >&"$tty_fd"
+      printf 'Workspace number or name: ' >&"$tty_fd"
       if ! IFS= read -r reply <&"$tty_fd"; then
         exec {tty_fd}>&-
         return 1
@@ -1068,7 +1149,14 @@ pick_workspace_interactive() {
         exec {tty_fd}>&-
         return 0
       fi
-      printf 'Invalid selection. Enter a listed number.\n' >&"$tty_fd"
+      if [[ -n "$reply" ]]; then
+        if resolved_name="$(resolve_workspace_selector "$reply")"; then
+          printf '%s\n' "$resolved_name"
+          exec {tty_fd}>&-
+          return 0
+        fi
+      fi
+      printf 'Invalid selection. Enter a listed number or unique workspace name.\n' >&"$tty_fd"
     done
   fi
 
@@ -1078,7 +1166,7 @@ pick_workspace_interactive() {
   done
 
   while true; do
-    printf 'Workspace number: ' >&2
+    printf 'Workspace number or name: ' >&2
     if ! IFS= read -r reply; then
       return 1
     fi
@@ -1086,14 +1174,20 @@ pick_workspace_interactive() {
       printf '%s\n' "${workspace_names[$((reply - 1))]}"
       return 0
     fi
-    echo "Invalid selection. Enter a listed number." >&2
+    if [[ -n "$reply" ]]; then
+      if resolved_name="$(resolve_workspace_selector "$reply")"; then
+        printf '%s\n' "$resolved_name"
+        return 0
+      fi
+    fi
+    echo "Invalid selection. Enter a listed number or unique workspace name." >&2
   done
 
   return 1
 }
 
 resolve_switch_target() {
-  local workspace_name workspace_dir running_agents current_root
+  local workspace_name workspace_dir running_agents current_root resolved_name match_status
   workspace_name="${1:-}"
 
   if ! in_jj_repo; then
@@ -1108,7 +1202,15 @@ resolve_switch_target() {
   fi
 
   if ! workspace_exists "$workspace_name"; then
-    print_error "Workspace '$workspace_name' does not exist in this repo."
+    if resolved_name="$(resolve_workspace_selector "$workspace_name")"; then
+      workspace_name="$resolved_name"
+    else
+      match_status=$?
+      if [[ "$match_status" -eq 2 ]]; then
+        print_error "Workspace selector '$workspace_name' is ambiguous."
+      fi
+      print_error "Workspace '$workspace_name' does not exist in this repo."
+    fi
   fi
 
   workspace_dir="$(workspace_path_for_name "$workspace_name" || true)"
