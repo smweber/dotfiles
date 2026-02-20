@@ -27,7 +27,7 @@ Usage:
   $SCRIPT_NAME help
 
 Behavior:
-  - In a jj repo root, 'codex', 'claude', or 'fish' creates a workspace at:
+  - In a jj repo root (not inside an existing agent workspace), 'codex', 'claude', or 'fish' creates a workspace at:
       $AGENT_WORKSPACE_ROOT/<repo>/<workspace-name>
     then launches the chosen agent from that workspace.
   - Build artifacts listed in:
@@ -863,7 +863,7 @@ launch_agent_workspace() {
 }
 
 create_workspace() {
-  local workspace_name root cwd repo_name workspace_dir
+  local workspace_name root cwd repo_name workspace_dir marker_path parent_root
   workspace_name="$1"
 
   if ! in_jj_repo; then
@@ -874,6 +874,15 @@ create_workspace() {
   cwd="$(pwd -P)"
   if [[ "$cwd" != "$root" ]]; then
     print_error "Workspace creation must be run from the workspace root. Current root: $root"
+  fi
+
+  marker_path="$root/$PARENT_MARKER"
+  if [[ -f "$marker_path" ]]; then
+    parent_root="$(managed_parent_root || true)"
+    if [[ -n "$parent_root" ]]; then
+      print_error "Workspace creation must be run from the parent repo root, not inside an agent workspace. Parent repo: $parent_root"
+    fi
+    print_error "Workspace creation cannot run inside an agent workspace (found $PARENT_MARKER)."
   fi
 
   if [[ -z "$workspace_name" ]]; then
