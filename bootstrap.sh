@@ -340,6 +340,31 @@ main() {
     fi
 
     # -------------------------------------------------------------------------
+    # Configure Claude Code statusline
+    # -------------------------------------------------------------------------
+    step "Configure Claude Code statusline"
+    CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+    if [[ -f "$CLAUDE_SETTINGS" ]]; then
+        if python3 -c "import json; d=json.load(open('$CLAUDE_SETTINGS')); exit(0 if 'statusLine' in d else 1)" 2>/dev/null; then
+            info "statusLine already configured in $CLAUDE_SETTINGS"
+        else
+            info "Adding statusLine config to $CLAUDE_SETTINGS"
+            python3 - "$CLAUDE_SETTINGS" <<'EOF'
+import json, sys
+path = sys.argv[1]
+with open(path) as f:
+    d = json.load(f)
+d["statusLine"] = {"type": "command", "command": "~/.dotfiles/bin/claude-statusline-command.sh"}
+with open(path, "w") as f:
+    json.dump(d, f, indent=2)
+    f.write("\n")
+EOF
+        fi
+    else
+        info "~/.claude/settings.json not found — run after Claude Code is installed"
+    fi
+
+    # -------------------------------------------------------------------------
     # macOS GUI software
     # -------------------------------------------------------------------------
     if [[ "$OS" == "macos" ]]; then
