@@ -22,7 +22,7 @@ BREW_PACKAGES="fish tmux neovim mise jj fzf ripgrep bat"
 BREW_FONTS="font-meslo-lg-nerd-font"
 
 # Extra packages (brew on macOS, apt on Linux)
-EXTRA_PACKAGES="btop direnv tree"
+EXTRA_PACKAGES="btop direnv tree jq"
 
 # Linux GUI packages (apt)
 LINUX_GUI_APT="i3-wm rofi feh polybar brightnessctl alacritty"
