@@ -58,12 +58,15 @@ if [ -n "$rl_five" ] || [ -n "$rl_seven" ]; then
     if [ "$f" -ge 80 ]; then color="0;31"
     elif [ "$f" -ge 50 ]; then color="0;33"
     else color="0;32"; fi
-    t5=""
+    t5="" reset_at_5=""
     if [ -n "$rl_resets_5h" ] && [ "$rl_resets_5h" -gt "$now" ] 2>/dev/null; then
       t5=$(fmt_time $(( (rl_resets_5h - now) / 60 )))
+      reset_at_5=$(date -d "@$rl_resets_5h" +%H:%M 2>/dev/null)
     fi
-    if [ -n "$t5" ]; then
-      parts+=("$(printf '\033[%sm%s:%s%%\033[0m' "$color" "$t5" "$f")")
+    if [ -n "$t5" ] && [ -n "$reset_at_5" ]; then
+      parts+=("$(printf '\033[%sm%s@%s %s%%\033[0m' "$color" "$t5" "$reset_at_5" "$f")")
+    elif [ -n "$t5" ]; then
+      parts+=("$(printf '\033[%sm%s %s%%\033[0m' "$color" "$t5" "$f")")
     else
       parts+=("$(printf '\033[%sm%s%%\033[0m' "$color" "$f")")
     fi
@@ -76,13 +79,13 @@ if [ -n "$rl_five" ] || [ -n "$rl_seven" ]; then
       t7=$(fmt_time $(( (rl_resets_7d - now) / 60 )))
     fi
     if [ -n "$t7" ]; then
-      parts+=("$(printf '\033[0;36m%s:%s%%\033[0m' "$t7" "$s")")
+      parts+=("$(printf '\033[0;36m%s %s%%\033[0m' "$t7" "$s")")
     else
-      parts+=("$(printf '\033[0;36m7d:%s%%\033[0m' "$s")")
+      parts+=("$(printf '\033[0;36m7d %s%%\033[0m' "$s")")
     fi
   fi
 
-  [ ${#parts[@]} -gt 0 ] && usage_part=$(IFS=" "; echo "${parts[*]}")
+  [ ${#parts[@]} -gt 0 ] && usage_part=$(printf '%s' "${parts[0]}"; for p in "${parts[@]:1}"; do printf '  %s' "$p"; done)
 fi
 
 # === Assemble ===
