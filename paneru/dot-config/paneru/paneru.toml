@@ -3,6 +3,7 @@
 # Example configuration for Paneru.
 # Docs here: https://github.com/karinushka/paneru/blob/main/CONFIGURATION.md
 #
+
 [options]
 # Enables focus follows mouse. Enabled by default, set to false to disable.
 # focus_follows_mouse = true
@@ -18,7 +19,8 @@
 # To disable animations, leave this unset or set to a very large value.
 animation_speed = 20
 
-reap_empty_workspaces = true
+# If enabled, a virtual workspace without any windows will be removed.
+#reap_empty_workspaces = true
 
 
 [swipe]
@@ -46,6 +48,7 @@ workspace_popup_status = false
 opacity = -0.10
 opacity_night = -0.05
 
+
 [bindings]
 # Moves the focus between windows.
 window_focus_west = "alt - h"
@@ -70,8 +73,8 @@ window_center = "alt - c"
 
 # Cycles between the window sizes defined in the `preset_column_widths` option.
 window_resize = "alt - r"
-window_grow = "alt + shift - ="
-window_shrink = "alt + shift - minus"
+window_grow = "alt - ="
+window_shrink = "alt - minus"
 
 # Toggle full width for the current focused window.
 window_fullwidth = "alt - return"
@@ -126,9 +129,7 @@ title = "Picture.*(in)?.*[Pp]icture"
 floating = true
 
 [windows.settings]
-# Title RegExp pattern is required.
 title = "System.*Settings"
-# Do not manage this window, e.g. it will be floating.
 floating = true
 
 [windows.all]
