@@ -1,6 +1,7 @@
 # syntax=toml
 #
 # Example configuration for Paneru.
+# Docs here: https://github.com/karinushka/paneru/blob/main/CONFIGURATION.md
 #
 [options]
 # Enables focus follows mouse. Enabled by default, set to false to disable.
