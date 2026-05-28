@@ -14,11 +14,11 @@ set -e
 
 # Stow packages (subdirectories in ~/.dotfiles)
 STOW_COMMON="sh tmux fish git jj nvim"
-STOW_MACOS="alacritty aerospace"
+STOW_MACOS="alacritty aerospace paneru"
 STOW_LINUX_GUI="alacritty i3 rofi polybar"
 
 # Homebrew packages (installed on both macOS and Linux)
-BREW_PACKAGES="fish tmux neovim mise jj fzf ripgrep bat"
+BREW_PACKAGES="fish tmux neovim mise jj fzf ripgrep bat paneru"
 BREW_FONTS="font-meslo-lg-nerd-font"
 
 # Extra packages (brew on macOS, apt on Linux)
@@ -29,7 +29,7 @@ LINUX_GUI_APT="i3-wm rofi feh polybar brightnessctl alacritty"
 
 # macOS GUI apps (brew casks)
 MACOS_CASKS="alacritty cryptomator obsidian discord slack firefox"
-MACOS_CASKS_EXTRA="nikitabobko/tap/aerospace"
+#MACOS_CASKS_EXTRA="nikitabobko/tap/aerospace"
 
 # macOS apps to install manually
 MACOS_MANUAL="Choosy DaisyDisk Maccy Yoink 1Password Things Steam"
