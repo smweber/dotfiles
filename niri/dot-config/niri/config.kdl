@@ -269,8 +269,6 @@ layout {
 // which may be more convenient to use.
 // See the binds section below for more spawn examples.
 
-// This line starts waybar, a commonly used bar for Wayland compositors.
-spawn-sh-at-startup "pkill -x waybar; waybar"
 spawn-at-startup "nm-applet"
 spawn-sh-at-startup "swaybg -i ~/.wallpaper.jpg -m fill"
 spawn-sh-at-startup "swayidle -w before-sleep 'swaylock -f'"
