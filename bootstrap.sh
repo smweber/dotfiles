@@ -18,7 +18,9 @@ STOW_MACOS="alacritty aerospace paneru"
 STOW_LINUX_GUI="alacritty i3 rofi polybar niri waybar"
 
 # Homebrew packages (installed on both macOS and Linux)
-BREW_PACKAGES="fish tmux neovim mise jj fzf ripgrep bat paneru"
+BREW_PACKAGES="fish tmux neovim mise jj fzf ripgrep bat"
+BREW_MACOS_PACKAGES="paneru"
+BREW_LINUX_PACKAGES=""
 BREW_FONTS="font-meslo-lg-nerd-font"
 
 # Extra packages (brew on macOS, apt on Linux)
@@ -257,10 +259,17 @@ main() {
     # -------------------------------------------------------------------------
     if has brew; then
         step "Install packages via Homebrew"
-        info "Packages: $BREW_PACKAGES"
+        if [[ "$OS" == "macos" ]]; then
+            BREW_PLATFORM_PACKAGES="$BREW_MACOS_PACKAGES"
+        else
+            BREW_PLATFORM_PACKAGES="$BREW_LINUX_PACKAGES"
+        fi
+        ALL_BREW_PACKAGES="$BREW_PACKAGES $BREW_PLATFORM_PACKAGES"
+
+        info "Packages: $ALL_BREW_PACKAGES"
         info "Fonts: $BREW_FONTS"
         if ask "Install these packages via Homebrew?"; then
-            run "brew install $BREW_PACKAGES"
+            run "brew install $ALL_BREW_PACKAGES"
             run "brew install --cask $BREW_FONTS" || run "brew install $BREW_FONTS"
         fi
     fi
