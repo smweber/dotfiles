@@ -1,0 +1,87 @@
+@define-color background #15161b;
+@define-color background_alt #2e303b;
+@define-color foreground #dfdfdf;
+@define-color primary #ffb52a;
+@define-color alert #bd2c40;
+@define-color disabled #707880;
+
+* {
+  border: none;
+  border-radius: 0;
+  font-family: "DejaVu Sans Mono", "Noto Sans Mono", monospace;
+  font-size: 10pt;
+  min-height: 0;
+}
+
+window#waybar {
+  background: transparent;
+  color: @foreground;
+}
+
+.modules-left,
+.modules-right {
+  background: @background;
+  border-radius: 6px;
+}
+
+#custom-niri-workspaces,
+#custom-niri-window,
+#memory,
+#cpu,
+#network,
+#pulseaudio,
+#battery,
+#tray,
+#clock {
+  padding: 0 9px;
+  margin: 0;
+}
+
+#custom-niri-workspaces {
+  padding-left: 0;
+}
+
+#custom-niri-workspaces label {
+  padding: 0 0;
+}
+
+#custom-niri-window {
+  color: @foreground;
+}
+
+#memory,
+#cpu,
+#network,
+#pulseaudio,
+#battery,
+#tray {
+  border-right: 1px solid rgba(112, 120, 128, 0.55);
+}
+
+#clock {
+  color: @primary;
+  padding-right: 10px;
+}
+
+#battery.warning {
+  color: @primary;
+}
+
+#battery.critical:not(.charging) {
+  color: @alert;
+}
+
+#network.disconnected,
+#pulseaudio.muted {
+  color: @disabled;
+}
+
+tooltip {
+  background: @background;
+  border: 1px solid @background_alt;
+  border-radius: 6px;
+}
+
+tooltip label {
+  color: @foreground;
+}

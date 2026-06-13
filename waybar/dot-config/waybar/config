@@ -1,0 +1,100 @@
+{
+  "layer": "top",
+  "position": "top",
+  "height": 24,
+  "spacing": 0,
+  "margin-top": 4,
+  "margin-left": 4,
+  "margin-right": 4,
+
+  "modules-left": [
+    "custom/niri-workspaces",
+    "custom/niri-window"
+  ],
+  "modules-right": [
+    "memory",
+    "cpu",
+    "network",
+    "pulseaudio",
+    "battery",
+    "tray",
+    "clock"
+  ],
+
+  "custom/niri-workspaces": {
+    "exec": "$HOME/.config/waybar/scripts/niri-workspaces",
+    "return-type": "json",
+    "interval": 1,
+    "tooltip": false
+  },
+
+  "custom/niri-window": {
+    "exec": "$HOME/.config/waybar/scripts/niri-window",
+    "return-type": "json",
+    "interval": 1,
+    "max-length": 60,
+    "tooltip": false
+  },
+
+  "memory": {
+    "interval": 2,
+    "format": "<span font_family=\"FontAwesome\" color=\"#ffb52a\"></span>&#160;&#160;{percentage:2}%"
+  },
+
+  "cpu": {
+    "interval": 2,
+    "format": "<span font_family=\"FontAwesome\" color=\"#ffb52a\"></span>&#160;&#160;{usage:2}%",
+    "tooltip": false
+  },
+
+  "network": {
+    "interval": 5,
+    "format-wifi": "<span font_family=\"FontAwesome\" color=\"#ffb52a\"></span>&#160;&#160;{essid}",
+    "format-ethernet": "<span font_family=\"FontAwesome\" color=\"#ffb52a\"></span>&#160;&#160;{ipaddr}",
+    "format-linked": "<span font_family=\"FontAwesome\" color=\"#ffb52a\"></span>&#160;&#160;linked",
+    "format-disconnected": "<span color=\"#707880\">⚠</span>&#160;&#160;<span color=\"#707880\">disc</span>",
+    "tooltip": false,
+    "on-click": "nm-connection-editor"
+  },
+
+  "pulseaudio": {
+    "format": "<span font_family=\"FontAwesome\" color=\"#ffb52a\">{icon}</span>&#160;&#160;{volume}%",
+    "format-muted": "<span font_family=\"FontAwesome\" color=\"#707880\"></span>&#160;&#160;<span color=\"#707880\">muted</span>",
+    "format-icons": {
+      "headphone": "",
+      "hands-free": "",
+      "headset": "",
+      "phone": "",
+      "portable": "",
+      "car": "",
+      "default": ["", "", ""]
+    },
+    "tooltip": false,
+    "on-click": "pavucontrol"
+  },
+
+  "battery": {
+    "states": {
+      "warning": 30,
+      "critical": 15
+    },
+    "format": "<span font_family=\"FontAwesome\" color=\"#ffb52a\">{icon}</span>&#160;&#160;{capacity}%",
+    "format-charging": "<span font_family=\"FontAwesome\" color=\"#ffb52a\"></span>&#160;&#160;{capacity}%",
+    "format-plugged": "<span font_family=\"FontAwesome\" color=\"#ffb52a\"></span>&#160;&#160;{capacity}%",
+    "format-full": "<span font_family=\"FontAwesome\" color=\"#ffb52a\"></span>&#160;&#160;{capacity}%",
+    "format-icons": ["", "", "", "", ""],
+    "tooltip": false
+  },
+
+  "tray": {
+    "icon-size": 14,
+    "spacing": 12
+  },
+
+  "clock": {
+    "interval": 1,
+    "format": "<span font_family=\"FontAwesome\" color=\"#ffb52a\"></span>&#160;&#160;{:%m-%d %H:%M}",
+    "format-alt": "{:%Y-%m-%d %H:%M:%S}",
+    "tooltip": false
+  }
+}

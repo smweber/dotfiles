@@ -1,0 +1,40 @@
+#!/usr/bin/env python3
+import html
+import json
+import subprocess
+import sys
+
+
+def emit(text, css_class=""):
+    print(json.dumps({"text": text, "class": css_class}, separators=(",", ":")))
+
+
+try:
+    raw = subprocess.check_output(
+        ["niri", "msg", "-j", "workspaces"],
+        text=True,
+        stderr=subprocess.DEVNULL,
+        timeout=1,
+    )
+    workspaces = json.loads(raw)
+except Exception:
+    emit("niri", "disconnected")
+    sys.exit(0)
+
+focused_output = next((w.get("output") for w in workspaces if w.get("is_focused")), None)
+visible = [w for w in workspaces if focused_output is None or w.get("output") == focused_output]
+visible.sort(key=lambda w: (w.get("idx") is None, w.get("idx", 0)))
+
+parts = []
+for workspace in visible:
+    name = workspace.get("name") or str(workspace.get("idx", "?"))
+    name = html.escape(str(name))
+
+    if workspace.get("is_focused"):
+        parts.append(f'<span background="#2e303b" underline="single" underline_color="#ffb52a"> {name} </span>')
+    elif workspace.get("active_window_id") is not None:
+        parts.append(f"<span> {name} </span>")
+    else:
+        parts.append(f'<span color="#707880"> {name} </span>')
+
+emit("".join(parts))

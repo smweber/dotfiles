@@ -63,7 +63,7 @@ else
     if [[ "$OSTYPE" == "darwin"* ]]; then
         PACKAGES="$PACKAGES aerospace"
     elif [[ -n "$DISPLAY" ]] || [[ -n "$WAYLAND_DISPLAY" ]]; then
-        PACKAGES="$PACKAGES i3 rofi polybar"
+        PACKAGES="$PACKAGES i3 rofi polybar niri waybar"
     fi
 fi
 

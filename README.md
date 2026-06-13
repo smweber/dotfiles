@@ -42,7 +42,7 @@ stow --dotfiles --no-folding nvim
 stow --dotfiles --no-folding git
 stow --dotfiles --no-folding jj
 stow --dotfiles --no-folding alacritty  # GUI only
-# Linux GUI: stow --dotfiles --no-folding i3 rofi polybar
+# Linux GUI: stow --dotfiles --no-folding i3 rofi polybar niri waybar
 # macOS: stow --dotfiles --no-folding aerospace
 ```
 
@@ -58,8 +58,10 @@ stow --dotfiles --no-folding alacritty  # GUI only
 | jj         | Jujutsu config           | All             |
 | alacritty  | Terminal emulator        | GUI             |
 | i3         | Window manager           | Linux GUI       |
+| niri       | Scrolling window manager | Linux GUI       |
 | rofi       | App launcher             | Linux GUI       |
 | polybar    | Status bar               | Linux GUI       |
+| waybar     | Wayland status bar       | Linux GUI       |
 | aerospace  | Window manager           | macOS           |
 
 ## Dependencies
@@ -69,7 +71,7 @@ Installed by the bootstrap script:
 - btop, direnv, tree
 - font-meslo-lg-nerd-font
 
-Linux GUI: i3-wm, rofi, feh, polybar, brightnessctl
+Linux GUI: i3-wm, rofi, feh, polybar, brightnessctl, waybar, fuzzel, swaybg, swaylock, swayidle, wl-clipboard, playerctl
 
 ## Agent Workspace Artifacts
 

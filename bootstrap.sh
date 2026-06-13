@@ -15,7 +15,7 @@ set -e
 # Stow packages (subdirectories in ~/.dotfiles)
 STOW_COMMON="sh tmux fish git jj nvim"
 STOW_MACOS="alacritty aerospace paneru"
-STOW_LINUX_GUI="alacritty i3 rofi polybar"
+STOW_LINUX_GUI="alacritty i3 rofi polybar niri waybar"
 
 # Homebrew packages (installed on both macOS and Linux)
 BREW_PACKAGES="fish tmux neovim mise jj fzf ripgrep bat paneru"
@@ -25,7 +25,7 @@ BREW_FONTS="font-meslo-lg-nerd-font"
 EXTRA_PACKAGES="btop direnv tree jq"
 
 # Linux GUI packages (apt)
-LINUX_GUI_APT="i3-wm rofi feh polybar brightnessctl alacritty"
+LINUX_GUI_APT="i3-wm rofi feh polybar brightnessctl alacritty waybar fuzzel swaybg swaylock swayidle wl-clipboard playerctl"
 
 # macOS GUI apps (brew casks)
 MACOS_CASKS="alacritty cryptomator obsidian discord slack firefox"

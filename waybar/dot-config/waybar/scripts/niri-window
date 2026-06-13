@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+import html
+import json
+import subprocess
+import sys
+
+
+def emit(text):
+    print(json.dumps({"text": text}, separators=(",", ":")))
+
+
+try:
+    raw = subprocess.check_output(
+        ["niri", "msg", "-j", "focused-window"],
+        text=True,
+        stderr=subprocess.DEVNULL,
+        timeout=1,
+    )
+    window = json.loads(raw)
+except Exception:
+    emit("")
+    sys.exit(0)
+
+if not isinstance(window, dict):
+    emit("")
+    sys.exit(0)
+
+title = window.get("title") or window.get("app_id") or ""
+if len(title) > 60:
+    title = title[:57] + "..."
+
+emit(html.escape(title))
