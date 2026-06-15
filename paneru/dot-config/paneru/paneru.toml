@@ -13,7 +13,7 @@
 
 # Array of widths used by the `window_resize` action to cycle between.
 # Defaults to 25%, 33%, 50%, 66% and 75%.
-# preset_column_widths = [ 0.25, 0.33, 0.50, 0.66, 0.75 ]
+preset_column_widths = [ 0.25, 0.33, 0.50, 0.66, 0.75, 1.0 ]
 
 # Window movement speed in pixels/second.
 # To disable animations, leave this unset or set to a very large value.
@@ -57,16 +57,18 @@ window_focus_north = "alt - k"
 window_focus_south = "alt - j"
 
 # Swaps windows in chosen direction.
-window_swap_west = "alt + shift - h"
-window_swap_east = "alt + shift - l"
+window_swap_west = "alt + ctrl - h"
+window_swap_east = "alt + ctrl - l"
+window_swap_north = "alt + ctrl - k"
+window_swap_south = "alt + ctrl - j"
 
 # Jump to the left-most or right-most windows.
-window_focus_first = "alt + cmd - h"
-window_focus_last = "alt + cmd - l"
+window_focus_first = "alt - home"
+window_focus_last = "alt - end"
 
 # Move the current window into the left-most or right-most positions.
-window_swap_first = "alt + cmd + shift - h"
-window_swap_last = "alt + cmd + shift - l"
+window_swap_first = "alt + ctrl - home"
+window_swap_last = "alt + ctrl - end"
 
 # Centers the current window on screen.
 window_center = "alt - c"
@@ -77,20 +79,20 @@ window_grow = "alt - ="
 window_shrink = "alt - minus"
 
 # Toggle full width for the current focused window.
-window_fullwidth = "alt - return"
+window_fullwidth = "alt - f"
 
 # Toggles the window for management. If unmanaged, the window will be "floating".
-window_manage = "alt + shift - t"
+window_manage = "alt - v"
 
 # Stacks and unstacks a window into the left column. Each window gets a 1/N of the height.
-window_stack = "alt + shift - j"
-window_unstack = "alt + shift - k"
+window_stack = "alt - ,"
+window_unstack = "alt - ."
 
 # Virtual desktops
-window_virtual_north = "ctrl + alt - k"
-window_virtual_south = "ctrl + alt - j"
-window_virtualmove_north = "ctrl + shift + alt - k"
-window_virtualmove_south = "ctrl + shift + alt - j"
+window_virtual_north = "alt - i"
+window_virtual_south = "alt - u"
+window_virtualmove_north = "ctrl + alt - i"
+window_virtualmove_south = "ctrl + alt - u"
 window_virtualnum_1 = "alt - 1"
 window_virtualnum_2 = "alt - 2"
 window_virtualnum_3 = "alt - 3"
@@ -100,15 +102,15 @@ window_virtualnum_6 = "alt - 6"
 window_virtualnum_7 = "alt - 7"
 window_virtualnum_8 = "alt - 8"
 window_virtualnum_9 = "alt - 9"
-window_virtualmovenum_1 = "alt + shift - 1"
-window_virtualmovenum_2 = "alt + shift - 2"
-window_virtualmovenum_3 = "alt + shift - 3"
-window_virtualmovenum_4 = "alt + shift - 4"
-window_virtualmovenum_5 = "alt + shift - 5"
-window_virtualmovenum_6 = "alt + shift - 6"
-window_virtualmovenum_7 = "alt + shift - 7"
-window_virtualmovenum_8 = "alt + shift - 8"
-window_virtualmovenum_9 = "alt + shift - 9"
+window_virtualmovenum_1 = "alt + ctrl - 1"
+window_virtualmovenum_2 = "alt + ctrl - 2"
+window_virtualmovenum_3 = "alt + ctrl - 3"
+window_virtualmovenum_4 = "alt + ctrl - 4"
+window_virtualmovenum_5 = "alt + ctrl - 5"
+window_virtualmovenum_6 = "alt + ctrl - 6"
+window_virtualmovenum_7 = "alt + ctrl - 7"
+window_virtualmovenum_8 = "alt + ctrl - 8"
+window_virtualmovenum_9 = "alt + ctrl - 9"
 
 # Snap an overflowing window into the viewport
 window_snap = "alt - s"

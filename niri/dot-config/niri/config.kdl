@@ -131,6 +131,7 @@ layout {
         proportion 0.5
         proportion 0.66667
         proportion 0.75
+        proportion 1.0
 
         // Fixed sets the width in logical pixels exactly.
         // fixed 1920
@@ -140,9 +141,9 @@ layout {
     // preset-window-heights { }
 
     // You can change the default width of the new windows.
-    default-column-width { proportion 0.5; }
+    // default-column-width { proportion 0.75; }
     // If you leave the brackets empty, the windows themselves will decide their initial width.
-    // default-column-width {}
+    default-column-width {}
 
     // By default focus ring and border are rendered as a solid background rectangle
     // behind windows. That is, they will show up through semitransparent windows.
@@ -407,9 +408,8 @@ binds {
     // or do a four-finger swipe up on a touchpad.
     Mod+O repeat=false { toggle-overview; }
 
-    Mod+Shift+Q repeat=false { close-window; }
+    Mod+Q repeat=false { close-window; }
 
-    // Paneru-style focus.
     Mod+Left  { focus-column-left; }
     Mod+Down  { focus-window-down; }
     Mod+Up    { focus-window-up; }
@@ -419,21 +419,14 @@ binds {
     Mod+K     { focus-window-up; }
     Mod+L     { focus-column-right; }
 
-    // Paneru-style horizontal swaps.
-    Mod+Shift+Left  { swap-window-left; }
-    Mod+Shift+Right { swap-window-right; }
-    Mod+Shift+H     { swap-window-left; }
-    Mod+Shift+L     { swap-window-right; }
-
-    // Preserve niri's column/window movement on secondary bindings.
     Mod+Ctrl+Left  { move-column-left; }
+    Mod+Ctrl+Down  { move-window-down; }
+    Mod+Ctrl+Up    { move-window-up; }
     Mod+Ctrl+Right { move-column-right; }
     Mod+Ctrl+H     { move-column-left; }
+    Mod+Ctrl+J     { move-window-down; }
+    Mod+Ctrl+K     { move-window-up; }
     Mod+Ctrl+L     { move-column-right; }
-    Mod+Alt+Down   { move-window-down; }
-    Mod+Alt+Up     { move-window-up; }
-    Mod+Alt+J      { move-window-down; }
-    Mod+Alt+K      { move-window-up; }
 
     // Alternative commands that move across workspaces when reaching
     // the first or last window in a column.
@@ -442,21 +435,32 @@ binds {
     // Mod+Ctrl+J     { move-window-down-or-to-workspace-down; }
     // Mod+Ctrl+K     { move-window-up-or-to-workspace-up; }
 
-    // First/last column, matching paneru's Alt+Cmd+H/L shape with Super+Alt.
-    Mod+Alt+H { focus-column-first; }
-    Mod+Alt+L { focus-column-last; }
-    Mod+Alt+Shift+H { move-column-to-first; }
-    Mod+Alt+Shift+L { move-column-to-last; }
+    Mod+Home { focus-column-first; }
+    Mod+End  { focus-column-last; }
+    Mod+Ctrl+Home { move-column-to-first; }
+    Mod+Ctrl+End  { move-column-to-last; }
 
     // Monitor movement. Paneru has one next-display action, so keep that primary.
-    Mod+Alt+N { focus-monitor-next; }
-    Mod+N { move-column-to-monitor-next; }
-    Mod+Shift+N { move-window-to-monitor-next; }
+    Mod+N { focus-monitor-next; }
+    Mod+Ctrl+N { move-column-to-monitor-next; }
 
-    Mod+Shift+Ctrl+Left  { move-column-to-monitor-left; }
-    Mod+Shift+Ctrl+Down  { move-column-to-monitor-down; }
-    Mod+Shift+Ctrl+Up    { move-column-to-monitor-up; }
-    Mod+Shift+Ctrl+Right { move-column-to-monitor-right; }
+    //Mod+Shift+Left  { focus-monitor-left; }
+    //Mod+Shift+Down  { focus-monitor-down; }
+    //Mod+Shift+Up    { focus-monitor-up; }
+    //Mod+Shift+Right { focus-monitor-right; }
+    //Mod+Shift+H     { focus-monitor-left; }
+    //Mod+Shift+J     { focus-monitor-down; }
+    //Mod+Shift+K     { focus-monitor-up; }
+    //Mod+Shift+L     { focus-monitor-right; }
+
+    //Mod+Shift+Ctrl+Left  { move-column-to-monitor-left; }
+    //Mod+Shift+Ctrl+Down  { move-column-to-monitor-down; }
+    //Mod+Shift+Ctrl+Up    { move-column-to-monitor-up; }
+    //Mod+Shift+Ctrl+Right { move-column-to-monitor-right; }
+    //Mod+Shift+Ctrl+H     { move-column-to-monitor-left; }
+    //Mod+Shift+Ctrl+J     { move-column-to-monitor-down; }
+    //Mod+Shift+Ctrl+K     { move-column-to-monitor-up; }
+    //Mod+Shift+Ctrl+L     { move-column-to-monitor-right; }
 
     // Alternatively, there are commands to move just a single window:
     // Mod+Shift+Ctrl+Left  { move-window-to-monitor-left; }
@@ -466,13 +470,14 @@ binds {
     // Mod+Shift+Ctrl+Left  { move-workspace-to-monitor-left; }
     // ...
 
-    // Paneru-style vertical workspaces.
-    Mod+Ctrl+J { focus-workspace-down; }
-    Mod+Ctrl+K { focus-workspace-up; }
-    Mod+Ctrl+Down { focus-workspace-down; }
-    Mod+Ctrl+Up { focus-workspace-up; }
-    Mod+Ctrl+Shift+J { move-column-to-workspace-down; }
-    Mod+Ctrl+Shift+K { move-column-to-workspace-up; }
+    Mod+Page_Down      { focus-workspace-down; }
+    Mod+Page_Up        { focus-workspace-up; }
+    Mod+U              { focus-workspace-down; }
+    Mod+I              { focus-workspace-up; }
+    Mod+Ctrl+Page_Down { move-column-to-workspace-down; }
+    Mod+Ctrl+Page_Up   { move-column-to-workspace-up; }
+    Mod+Ctrl+U         { move-column-to-workspace-down; }
+    Mod+Ctrl+I         { move-column-to-workspace-up; }
 
     // Alternatively, there are commands to move just a single window:
     // Mod+Ctrl+Page_Down { move-window-to-workspace-down; }
@@ -532,15 +537,15 @@ binds {
     Mod+7 { focus-workspace 7; }
     Mod+8 { focus-workspace 8; }
     Mod+9 { focus-workspace 9; }
-    Mod+Shift+1 { move-column-to-workspace 1; }
-    Mod+Shift+2 { move-column-to-workspace 2; }
-    Mod+Shift+3 { move-column-to-workspace 3; }
-    Mod+Shift+4 { move-column-to-workspace 4; }
-    Mod+Shift+5 { move-column-to-workspace 5; }
-    Mod+Shift+6 { move-column-to-workspace 6; }
-    Mod+Shift+7 { move-column-to-workspace 7; }
-    Mod+Shift+8 { move-column-to-workspace 8; }
-    Mod+Shift+9 { move-column-to-workspace 9; }
+    Mod+Ctrl+1 { move-column-to-workspace 1; }
+    Mod+Ctrl+2 { move-column-to-workspace 2; }
+    Mod+Ctrl+3 { move-column-to-workspace 3; }
+    Mod+Ctrl+4 { move-column-to-workspace 4; }
+    Mod+Ctrl+5 { move-column-to-workspace 5; }
+    Mod+Ctrl+6 { move-column-to-workspace 6; }
+    Mod+Ctrl+7 { move-column-to-workspace 7; }
+    Mod+Ctrl+8 { move-column-to-workspace 8; }
+    Mod+Ctrl+9 { move-column-to-workspace 9; }
 
     // Alternatively, there are commands to move just a single window:
     // Mod+Ctrl+1 { move-window-to-workspace 1; }
@@ -558,8 +563,6 @@ binds {
     Mod+Comma  { consume-window-into-column; }
     // Expel the bottom window from the focused column to the right.
     Mod+Period { expel-window-from-column; }
-    Mod+Shift+J { consume-window-into-column; }
-    Mod+Shift+K { expel-window-from-column; }
 
     // Cycle through widths set in preset-column-widths.
     Mod+R { switch-preset-column-width; }
@@ -569,8 +572,8 @@ binds {
     Mod+Ctrl+Shift+R { switch-preset-window-height; }
     Mod+Ctrl+R { reset-window-height; }
 
-    Mod+Return { maximize-column; }
-    Mod+Shift+Return { fullscreen-window; }
+    Mod+F { maximize-column; }
+    Mod+Shift+F { fullscreen-window; }
 
     // While maximize-column leaves gaps and borders around the window,
     // maximize-window-to-edges doesn't: the window expands to the edges of the screen.
@@ -583,7 +586,6 @@ binds {
     Mod+Ctrl+F { expand-column-to-available-width; }
 
     Mod+C { center-column; }
-    Mod+S { center-column; }
 
     // Center all fully visible columns on screen.
     Mod+Ctrl+C { center-visible-columns; }
@@ -605,7 +607,6 @@ binds {
 
     // Move the focused window between the floating and the tiling layout.
     Mod+V       { toggle-window-floating; }
-    Mod+Shift+Backslash { toggle-window-floating; }
     Mod+Shift+V { switch-focus-between-floating-and-tiling; }
 
     // Toggle tabbed column display mode.
