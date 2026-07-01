@@ -19,13 +19,22 @@ cask "obsidian"
 cask "discord"
 cask "slack"
 cask "firefox"
+cask "1password"
+cask "choosy"
+cask "steam"
+cask "maccy"
+# Paid apps also sold on the Mac App Store. These casks are the direct-download
+# versions (own license); if you bought them on the App Store, use the `mas`
+# entries below instead (mas "DaisyDisk", id: 411643860 / mas "Yoink", id: 457622435).
+cask "daisydisk"
+cask "yoink"
 
 # Window manager (uncomment if desired)
 # tap  "nikitabobko/tap"
 # cask "nikitabobko/tap/aerospace"
 
-# Mac App Store apps (requires `brew "mas"` + being signed into the App Store).
-# IDs not yet verified - left manual for now (see MACOS_MANUAL in packages.sh).
-# brew "mas"
-# mas "Things", id: 904280696
-# mas "Yoink",  id: 457622435
+# Mac App Store apps (requires being signed into the App Store).
+# `brew bundle` installs mas first, then these; the mas lines are skipped
+# with a warning if you're not signed in.
+brew "mas"
+mas "Things", id: 904280696

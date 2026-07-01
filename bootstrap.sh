@@ -362,7 +362,7 @@ EOF
     # -------------------------------------------------------------------------
     # macOS manual apps (not available via cask / needs App Store)
     # -------------------------------------------------------------------------
-    if [[ "$OS" == "macos" ]]; then
+    if [[ "$OS" == "macos" ]] && [[ -n "$MACOS_MANUAL" ]]; then
         echo ""
         warn "Remember to install these manually (App Store / direct download):"
         for app in $MACOS_MANUAL; do

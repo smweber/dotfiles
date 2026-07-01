@@ -24,7 +24,8 @@ LINUX_FLATPAK="md.obsidian.Obsidian com.discordapp.Discord com.slack.Slack org.c
 # ----------------------------------------------------------------------------
 # Apps that still need a manual install (no reliable package source)
 # ----------------------------------------------------------------------------
-MACOS_MANUAL="Choosy DaisyDisk Maccy Yoink 1Password Things Steam"
+# macOS apps are now all handled by Brewfile.macos (casks + mas). Nothing manual.
+MACOS_MANUAL=""
 LINUX_MANUAL="1Password (https://1password.com/downloads/linux/)"
 
 # ----------------------------------------------------------------------------
