@@ -260,16 +260,8 @@ main() {
         info "TPM not found, skipping"
     fi
 
-    # TEMPORARY: pin catppuccin to a commit compatible with the old-format
-    # config in tmux/dot-tmux.conf. Remove once the config is migrated to v2.
-    step "Fix tmux theme (temporary)"
-    if [[ -d ~/.tmux/plugins/tmux ]]; then
-        if ask "Checkout tmux theme commit 5ed4e8a6?"; then
-            run "cd ~/.tmux/plugins/tmux && git checkout 5ed4e8a6"
-        fi
-    else
-        info "Tmux theme plugin not found, skipping"
-    fi
+    # (catppuccin theme is pinned to v0.3.0 in tmux/dot-tmux.conf, so no
+    # post-install checkout hack is needed anymore.)
 
     # -------------------------------------------------------------------------
     # Sync Neovim plugins (lazy.nvim) headlessly
