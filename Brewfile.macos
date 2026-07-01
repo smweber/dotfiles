@@ -1,0 +1,31 @@
+# Brewfile.macos - macOS-only Homebrew packages, casks, and fonts.
+#
+# Applied in addition to the common Brewfile:
+#   brew bundle --file Brewfile.macos
+#
+# Casks are macOS-only; on Linux these apps come from flatpak instead
+# (see LINUX_FLATPAK in packages.sh).
+
+# macOS-only formulae
+brew "paneru"     # scrolling window manager helper
+
+# Nerd font (cask; on Linux install the font manually)
+cask "font-meslo-lg-nerd-font"
+
+# GUI applications
+cask "alacritty"
+cask "cryptomator"
+cask "obsidian"
+cask "discord"
+cask "slack"
+cask "firefox"
+
+# Window manager (uncomment if desired)
+# tap  "nikitabobko/tap"
+# cask "nikitabobko/tap/aerospace"
+
+# Mac App Store apps (requires `brew "mas"` + being signed into the App Store).
+# IDs not yet verified - left manual for now (see MACOS_MANUAL in packages.sh).
+# brew "mas"
+# mas "Things", id: 904280696
+# mas "Yoink",  id: 457622435

@@ -14,12 +14,24 @@ The script will guide you through:
 - Updating system packages (Linux)
 - Setting up SSH keys and GitHub access
 - Cloning this repo to `~/.dotfiles`
-- Installing and running GNU Stow
-- Installing Homebrew and packages
-- Setting up tmux with TPM
+- Installing Homebrew and packages (via `brew bundle`)
+- Symlinking configs with GNU Stow
+- Setting up tmux (TPM) and Neovim (lazy.nvim) plugins
+- Setting fish as the default shell
 - Installing GUI apps (if applicable)
 
-Each step is interactive—you can skip anything you don't need.
+Each step is interactive—you can skip anything you don't need. Run
+`ASSUME_YES=1 bash bootstrap.sh` to accept every step non-interactively.
+
+### How it's organized
+
+- **`Brewfile`** / **`Brewfile.macos`** — declarative Homebrew package lists
+  (formulae, casks, fonts), applied idempotently with `brew bundle`.
+- **`packages.sh`** — single source of truth for stow packages plus the
+  system packages Homebrew doesn't handle (Linux apt/flatpak). Sourced by
+  both `bootstrap.sh` and `restow.sh`.
+- **`bootstrap.sh`** — thin orchestrator that installs Homebrew, runs
+  `brew bundle`, stows configs, and handles the remaining OS-specific bits.
 
 ## Manual Setup
 
@@ -30,9 +42,9 @@ If you prefer to set things up manually:
 git clone git@github.com:smweber/dotfiles.git ~/.dotfiles
 cd ~/.dotfiles
 
-# Install stow
-# macOS: brew install stow
-# Linux: sudo apt install stow
+# Install packages (includes GNU Stow 2.4+)
+brew bundle --file Brewfile
+brew bundle --file Brewfile.macos   # macOS only
 
 # Stow the configs you want (use --no-folding to create individual symlinks)
 stow --dotfiles --no-folding sh
@@ -66,12 +78,15 @@ stow --dotfiles --no-folding alacritty  # GUI only
 
 ## Dependencies
 
-Installed by the bootstrap script:
-- fish, tmux, neovim, mise, jj, fzf, ripgrep, bat
-- btop, direnv, tree
-- font-meslo-lg-nerd-font
+Homebrew packages are declared in `Brewfile` (cross-platform) and
+`Brewfile.macos` (macOS casks/fonts). System packages Homebrew doesn't
+cover live in `packages.sh`:
 
-Linux GUI: i3-wm, rofi, feh, polybar, brightnessctl, waybar, fuzzel, swaybg, swaylock, swayidle, wl-clipboard, playerctl
+- Linux GUI (apt): i3-wm, rofi, feh, polybar, brightnessctl, waybar, fuzzel, swaybg, swaylock, swayidle, wl-clipboard, playerctl
+- Linux GUI apps (flatpak): Obsidian, Discord, Slack, Cryptomator
+
+To change what gets installed, edit the `Brewfile`s or `packages.sh`—no
+need to touch `bootstrap.sh`.
 
 ## Agent Workspace Artifacts
 

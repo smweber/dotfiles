@@ -12,6 +12,9 @@ set -e
 
 cd ~/.dotfiles
 
+# Shared package config (single source of truth for stow package lists)
+source ./packages.sh
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -57,13 +60,13 @@ fi
 if [[ $# -gt 0 ]]; then
     PACKAGES="$@"
 else
-    # All stow packages (directories with dot- prefixed contents)
-    PACKAGES="sh fish tmux nvim git jj alacritty"
-    # Add platform-specific
+    # Derive from shared config (single source of truth in packages.sh)
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        PACKAGES="$PACKAGES aerospace"
-    elif [[ -n "$DISPLAY" ]] || [[ -n "$WAYLAND_DISPLAY" ]]; then
-        PACKAGES="$PACKAGES i3 rofi polybar niri waybar"
+        PACKAGES="$(stow_packages macos true)"
+    elif [[ -n "${DISPLAY:-}" ]] || [[ -n "${WAYLAND_DISPLAY:-}" ]]; then
+        PACKAGES="$(stow_packages linux true)"
+    else
+        PACKAGES="$(stow_packages linux false)"
     fi
 fi
 
