@@ -12,7 +12,7 @@ brew "paneru"     # scrolling window manager helper
 # Nerd font (cask; on Linux install the font manually)
 cask "font-meslo-lg-nerd-font"
 
-# GUI applications
+# GUI applications (direct-download casks)
 cask "alacritty"
 cask "cryptomator"
 cask "obsidian"
@@ -21,13 +21,6 @@ cask "slack"
 cask "firefox"
 cask "1password"
 cask "choosy"
-cask "steam"
-cask "maccy"
-# Paid apps also sold on the Mac App Store. These casks are the direct-download
-# versions (own license); if you bought them on the App Store, use the `mas`
-# entries below instead (mas "DaisyDisk", id: 411643860 / mas "Yoink", id: 457622435).
-cask "daisydisk"
-cask "yoink"
 
 # Window manager (uncomment if desired)
 # tap  "nikitabobko/tap"
@@ -37,4 +30,14 @@ cask "yoink"
 # `brew bundle` installs mas first, then these; the mas lines are skipped
 # with a warning if you're not signed in.
 brew "mas"
-mas "Things", id: 904280696
+mas "Things",                id: 904280696
+mas "DaisyDisk",             id: 411643860
+mas "Yoink",                 id: 457622435
+mas "Maccy",                 id: 1527619437
+mas "Meeter",                id: 1510445899
+mas "Itsyhome for HomeKit",  id: 6758070650
+
+# Safari extensions (distributed via the App Store)
+mas "StopTheMadness Pro",    id: 6471380298
+mas "Vinegar - Tube Cleaner", id: 1591303229
+mas "1Password for Safari",  id: 1569813296
