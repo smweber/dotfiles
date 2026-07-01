@@ -7,6 +7,7 @@ input=$(cat)
 # === Context window ===
 used=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
 model=$(echo "$input" | jq -r '.model.display_name // empty')
+effort=$(echo "$input" | jq -r '.effort.level // empty')
 cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // empty')
 
 # Compact model name: "Claude Opus 4.6 (1M context)" → "Opus 4.6 (1M)"
@@ -85,7 +86,7 @@ if [ -n "$rl_five" ] || [ -n "$rl_seven" ]; then
     fi
   fi
 
-  [ ${#parts[@]} -gt 0 ] && usage_part=$(printf '%s' "${parts[0]}"; for p in "${parts[@]:1}"; do printf '  %s' "$p"; done)
+  [ ${#parts[@]} -gt 0 ] && usage_part=$(printf '%s' "${parts[0]}"; for p in "${parts[@]:1}"; do printf ' \033[2;37m·\033[0m %s' "$p"; done)
 fi
 
 # === Assemble ===
@@ -93,11 +94,14 @@ sections=()
 [ -n "$ctx_part" ]   && sections+=("$ctx_part")
 [ -n "$usage_part" ] && sections+=("$usage_part")
 [ -n "$model" ]      && sections+=("$(printf '\033[0;35m%s\033[0m' "$model")")
+[ -n "$effort" ]     && sections+=("$(printf '\033[2;35meffort:%s\033[0m' "$effort")")
 [ -n "$branch" ]     && sections+=("$(printf '\033[0;32m%s\033[0m' "$branch")")
 
+# Dim " | " separator between sections
+sep=$(printf ' \033[2;37m|\033[0m ')
 result=""
 for s in "${sections[@]}"; do
-  [ -z "$result" ] && result="$s" || result="$result    $s"
+  [ -z "$result" ] && result="$s" || result="$result$sep$s"
 done
 
 printf "%b\n" "$result"
