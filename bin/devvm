@@ -1294,6 +1294,31 @@ complete_command() {
     return 0
 }
 
+# Adapt completion output to zsh's `value:description` format. CURRENT and the
+# full zsh words array are accepted here so the shell registration does not
+# need to duplicate argument-position logic.
+complete_zsh() {
+    local current="$1"; shift
+    [[ "$current" =~ ^[0-9]+$ ]] || return 1
+    local -a words=("$@") context=()
+    local context_count=$((current - 2))
+    if ((context_count > 0)); then
+        context=("${words[@]:1:context_count}")
+    fi
+
+    local value description
+    while IFS=$'\t' read -r value description; do
+        [[ -n "$value" ]] || continue
+        value="${value//:/\\:}"
+        if [[ -n "$description" ]]; then
+            description="${description//:/\\:}"
+            printf '%s:%s\n' "$value" "$description"
+        else
+            printf '%s\n' "$value"
+        fi
+    done < <(complete_command "${context[@]}")
+}
+
 # --- main ------------------------------------------------------------------
 
 main() {
@@ -1303,6 +1328,12 @@ main() {
         __complete)
             shift
             complete_command "$@"
+            return
+            ;;
+        __complete-zsh)
+            shift
+            (($# >= 2)) || die "usage: devvm __complete-zsh CURRENT WORD..."
+            complete_zsh "$@"
             return
             ;;
         -h|--help|help|"")
