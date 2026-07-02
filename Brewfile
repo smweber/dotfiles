@@ -12,6 +12,7 @@ brew "stow"
 brew "fish"
 brew "tmux"
 brew "neovim"
+brew "mosh"       # roaming-friendly SSH replacement
 
 # Dev tooling
 brew "mise"       # runtime version manager
