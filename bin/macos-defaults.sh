@@ -81,6 +81,45 @@ set_hotkey 81 93 30 524288
 say "Mission Control: Option+O  [VERIFY]"
 set_hotkey 32 111 31 524288
 
+# --- Neutralize Cmd+H (Hide window) ------------------------------------------
+# Cmd+H is a standard app *menu* shortcut, titled "Hide <AppName>" in each app
+# (there is no bare "Hide" item), so it can't be killed via symbolichotkeys and
+# macOS has no single global switch for it. The reliable defaults-only route is
+# to override the "Hide <AppName>" menu item per app via NSUserKeyEquivalents.
+# Entries written to the global domain (-g) are read by every app, which then
+# applies whichever titles match its own menu, so one write covers the list.
+#
+# A NO-BREAK SPACE (U+00A0) as the value *disables* the shortcut; a normal
+# space or empty string does not work. \302\240 is that character in UTF-8.
+#
+# VERIFY: the item title is exactly what follows "Hide " in an app's own
+# application menu, so extend/correct the list per your machine. Non-native
+# apps (Electron/Chromium: Chrome, Slack, VS Code) may ignore NSUserKey-
+# Equivalents entirely. Takes effect after each app is relaunched.
+nbsp=$(printf '\302\240')
+say "Disable Cmd+H (Hide window) for installed apps  [VERIFY]"
+
+# Baseline list of stock apps, as a safety net in case the enumeration below
+# comes up empty for any reason.
+for app in \
+    "Finder" "Safari" "Calendar" "Maps" "Music" "Mail" "Messages" \
+    "Notes" "Preview" "TextEdit" "System Settings"; do
+    defaults write -g NSUserKeyEquivalents -dict-add "Hide $app" "$nbsp"
+done
+
+# Also cover every installed GUI app, so casks/mas apps from Brewfile.macos
+# (and anything installed by other means) are handled without maintaining a
+# list by hand. macOS app lists no longer live in packages.sh, and cask tokens
+# are slugs rather than "Hide <Name>" menu titles, so instead of parsing either
+# file we read each bundle's own menu name (CFBundleName, falling back to the
+# .app filename) straight from the standard Applications folders.
+while IFS= read -r bundle; do
+    name=$(defaults read "$bundle/Contents/Info" CFBundleName 2>/dev/null)
+    [[ -n "$name" ]] || name=$(basename "$bundle" .app)
+    defaults write -g NSUserKeyEquivalents -dict-add "Hide $name" "$nbsp"
+done < <(find /Applications "$HOME/Applications" /System/Applications \
+             -maxdepth 2 -name '*.app' -prune -print 2>/dev/null)
+
 # ============================================================================
 # Desktop / Dock / Stage Manager
 # ============================================================================
