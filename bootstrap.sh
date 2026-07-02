@@ -395,6 +395,24 @@ main() {
     fi
 
     # -------------------------------------------------------------------------
+    # Colocate Jujutsu on the dotfiles checkout
+    # -------------------------------------------------------------------------
+    # jj shares the Git backend (colocated) so gh and git tooling keep working
+    # while jj is the primary VCS. Only meaningful on a fresh clone; skip when
+    # the checkout is already colocated (e.g. re-running bootstrap on the host).
+    #
+    # `jj git init --colocate` imports origin/master as an *untracked* remote
+    # bookmark (git.auto-local-bookmark defaults to false), so without the
+    # explicit track step a fresh checkout has no local master tracking origin.
+    if has jj && [[ -d "$DOTFILES/.git" ]] && [[ ! -d "$DOTFILES/.jj" ]]; then
+        step "Colocate Jujutsu on the dotfiles repo"
+        if ask "Initialize colocated jj in $DOTFILES?"; then
+            run jj git init --colocate "$DOTFILES"
+            run jj -R "$DOTFILES" bookmark track master --remote=origin
+        fi
+    fi
+
+    # -------------------------------------------------------------------------
     # Stow dotfiles
     # -------------------------------------------------------------------------
     step "Stow dotfiles"

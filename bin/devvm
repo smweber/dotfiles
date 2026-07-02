@@ -18,7 +18,6 @@ IMAGE="ubuntu:24.04"
 CPUS=4
 STORAGE_GIB=50
 VM_USER="dev"
-DOTFILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/devvm"
 MACHINES_DIR="$CONFIG_DIR/machines"
@@ -527,26 +526,6 @@ require_ssh() {
 
 # --- provisioning ----------------------------------------------------------
 
-make_dotfiles_archive() {
-    # Echoes the path to a fresh archive; caller removes it.
-    local archive
-    archive="$(mktemp /tmp/devvm-dotfiles.XXXXXX.tar.gz)"
-    # Archive non-hidden top-level entries plus the repository's .gitignore.
-    # BSD tar treats `--exclude=./.*` as matching the `.` archive root and
-    # emits an empty archive; explicit shell expansion is portable and also
-    # keeps host-local .git/.jj/.claude/.codex state out of guests.
-    (
-        cd "$DOTFILES_DIR"
-        local -a entries=(* .gitignore)
-        tar -czf "$archive" "${entries[@]}"
-    )
-    if ! tar -tzf "$archive" bootstrap.sh bin/devvm >/dev/null 2>&1; then
-        rm -f "$archive"
-        die "dotfiles archive is incomplete (missing bootstrap.sh or bin/devvm)"
-    fi
-    echo "$archive"
-}
-
 smol_prepare_guest() {
     local name="$1"
     echo "Installing the minimal guest prerequisites..."
@@ -590,112 +569,6 @@ ssh_prepare_guest() {
     "
 }
 
-# Copy the local dotfiles checkout into the machine and extract as the dev user.
-push_dotfiles() {
-    local name="$1"
-    echo "Copying the local dotfiles checkout into '$name'..."
-    local archive guest_archive="/tmp/devvm-dotfiles.tar.gz"
-    archive="$(make_dotfiles_archive)"
-    # shellcheck disable=SC2064
-    trap "rm -f '$archive'" RETURN
-
-    if [[ "$BACKEND" == "smol" ]]; then
-        # smolvm mounts a runtime tmpfs on /tmp for exec, while `machine cp`
-        # writes to the persistent rootfs underneath it. Transfer through the
-        # persistent user home so the following exec can see the archive.
-        guest_archive="/home/$VM_USER/.devvm-dotfiles.tar.gz"
-    fi
-    m_cp "$name" "$archive" "$guest_archive"
-    if [[ "$BACKEND" == "smol" ]]; then
-        smolvm machine exec --name "$name" -- \
-            chown "$VM_USER:$VM_USER" "$guest_archive"
-    fi
-    m_run "$name" bash -lc '
-        set -e
-        archive="$1"
-        vcs_state="$HOME/.devvm/dotfiles-vcs"
-        rm -rf "$vcs_state"
-        mkdir -p "$vcs_state"
-        if [[ -d "$HOME/.dotfiles/.git" ]]; then
-            mv "$HOME/.dotfiles/.git" "$vcs_state/.git"
-        fi
-        if [[ -d "$HOME/.dotfiles/.jj" ]]; then
-            mv "$HOME/.dotfiles/.jj" "$vcs_state/.jj"
-        fi
-        rm -rf "$HOME/.dotfiles" &&
-        mkdir -p "$HOME/.dotfiles" &&
-        if [[ -d "$vcs_state/.git" ]]; then
-            mv "$vcs_state/.git" "$HOME/.dotfiles/.git"
-        fi &&
-        if [[ -d "$vcs_state/.jj" ]]; then
-            mv "$vcs_state/.jj" "$HOME/.dotfiles/.jj"
-        fi &&
-        rmdir "$vcs_state" &&
-        tar -xzf "$archive" -C "$HOME/.dotfiles" &&
-        if [[ -f "$HOME/.profile" && ! -L "$HOME/.profile" ]]; then
-            mv "$HOME/.profile" "$HOME/.profile.before-devvm"
-        fi
-        rm -f "$archive" 2>/dev/null || sudo rm -f "$archive"
-    ' _ "$guest_archive"
-}
-
-dotfiles_origin_url() {
-    local url
-    url="$(git -C "$DOTFILES_DIR" remote get-url origin 2>/dev/null)" ||
-        die "host dotfiles checkout has no origin remote"
-    case "$url" in
-        git@github.com:*)
-            printf 'https://github.com/%s\n' "${url#git@github.com:}"
-            ;;
-        ssh://git@github.com/*)
-            printf 'https://github.com/%s\n' "${url#ssh://git@github.com/}"
-            ;;
-        *)
-            printf '%s\n' "$url"
-            ;;
-    esac
-}
-
-dotfiles_default_branch() {
-    local branch
-    branch="$(git -C "$DOTFILES_DIR" symbolic-ref --short \
-        refs/remotes/origin/HEAD 2>/dev/null)" || branch=""
-    if [[ -n "$branch" ]]; then
-        printf '%s\n' "${branch#origin/}"
-    elif git -C "$DOTFILES_DIR" show-ref --verify --quiet refs/remotes/origin/main; then
-        printf 'main\n'
-    else
-        printf 'master\n'
-    fi
-}
-
-# Attach the copied provisioning snapshot to the GitHub history without
-# replacing its files. Jujutsu is colocated with Git so jj is the primary VCS
-# while gh and other GitHub tooling continue to work normally.
-attach_dotfiles_repo() {
-    local name="$1" origin branch
-    origin="$(dotfiles_origin_url)"
-    branch="$(dotfiles_default_branch)"
-    echo "Attaching guest dotfiles to $origin ($branch) with Jujutsu..."
-    m_run_stream "$name" bash -lc '
-        cd "$HOME/.dotfiles"
-        if [[ -d .jj && -d .git ]]; then
-            git remote set-url origin "$1"
-            git fetch origin "$2"
-            jj git import
-        else
-            rm -rf .git .jj
-            git init -b "$2"
-            git remote add origin "$1"
-            git fetch origin "$2"
-            git reset --mixed "origin/$2"
-            jj git init --colocate .
-        fi
-        jj bookmark track "$2" --remote=origin
-        jj status
-    ' _ "$origin" "$branch"
-}
-
 bootstrap_machine() {
     local name="$1"
     load_machine "$name"
@@ -703,10 +576,11 @@ bootstrap_machine() {
         die "'$name' is unmanaged; refusing to bootstrap it"
 
     "${BACKEND}_prepare_guest" "$name"
-    push_dotfiles "$name"
+    # Provision straight from GitHub, the same path a fresh host uses: bootstrap.sh
+    # clones smweber/dotfiles (public) and colocates jj itself. This avoids copying
+    # the host working tree into the guest, which broke on macOS-host -> Linux-guest.
     m_run_stream "$name" bash -lc \
-        'exec "$HOME/.dotfiles/bootstrap.sh" "$@"' _ --profile agent-vm --yes
-    attach_dotfiles_repo "$name"
+        'curl -fsSL https://raw.githubusercontent.com/smweber/dotfiles/master/bootstrap.sh | bash -s -- --profile agent-vm --yes'
 
     if is_exposed_backend; then
         seed_authorized_keys "$name"
