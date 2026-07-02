@@ -22,6 +22,7 @@ brew "fzf"
 brew "ripgrep"
 brew "bat"
 brew "direnv"
+brew "tree-sitter-cli"  # parser generator for nvim-treesitter (:TSUpdate)
 
 # CLI utilities
 brew "btop"

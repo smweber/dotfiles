@@ -140,6 +140,15 @@ return {
   -- AI
   {
     "Exafunction/windsurf.nvim",
+    -- The Windsurf/Codeium language server has no ARM Linux build; on that
+    -- platform the plugin errors repeatedly instead of failing gracefully, so
+    -- skip it entirely there (lazy.nvim omits plugins whose `enabled` is false).
+    enabled = function()
+      local u = vim.loop.os_uname()
+      local arm_linux = u.sysname == "Linux"
+        and (u.machine == "aarch64" or u.machine:find("^arm") ~= nil)
+      return not arm_linux
+    end,
     dependencies = {
       "nvim-lua/plenary.nvim",
       "hrsh7th/nvim-cmp",
