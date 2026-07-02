@@ -489,6 +489,18 @@ main() {
     fi
 
     # -------------------------------------------------------------------------
+    # macOS system preferences (defaults)
+    # -------------------------------------------------------------------------
+    if [[ "$OS" == "macos" ]] && [[ -f "$DOTFILES/bin/macos-defaults.sh" ]]; then
+        step "Apply macOS system preferences"
+        info "Keyboard, Dock, trackpad and menu-bar tweaks (see bin/macos-defaults.sh)"
+        info "A few settings are marked [VERIFY] - confirm them in System Settings"
+        if ask "Apply macOS defaults now?"; then
+            run "bash \"$DOTFILES/bin/macos-defaults.sh\""
+        fi
+    fi
+
+    # -------------------------------------------------------------------------
     # macOS manual apps (not available via cask / needs App Store)
     # -------------------------------------------------------------------------
     if [[ "$OS" == "macos" ]] && [[ -n "$MACOS_MANUAL" ]]; then
