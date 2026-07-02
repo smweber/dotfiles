@@ -23,6 +23,35 @@ The script will guide you through:
 Each step is interactive—you can skip anything you don't need. Run
 `ASSUME_YES=1 bash bootstrap.sh` to accept every step non-interactively.
 
+The default `host` profile installs `smolvm` but no LLM agents. Machines
+created by `devvm` set `SMOLVM_GUEST=1`, so the same bootstrap automatically
+uses the `agent-vm` profile and installs Codex and Claude Code there.
+
+## Isolated development VMs
+
+`devvm` is a small wrapper around persistent smolvm machines:
+
+```bash
+devvm create client-a
+devvm create client-b --memory 4096
+devvm auth client-a github
+devvm auth client-a codex
+devvm auth client-a claude
+devvm shell client-a
+
+devvm port client-a 3000:3000
+devvm stop client-a
+devvm status
+```
+
+Repositories and default port mappings are hardcoded in the readable
+`configure_machine()` function near the top of `bin/devvm`. Repositories live
+only on the VM's persistent disk; no host directories or SSH agent are mounted.
+GitHub authentication happens inside each VM with `gh auth login`.
+Creation prompts for memory with a host-aware default capped at 2 GiB; pass
+`--memory MiB` to skip the prompt. `devvm shell` attaches to a persistent tmux
+session.
+
 ### How it's organized
 
 - **`Brewfile`** / **`Brewfile.macos`** — declarative Homebrew package lists

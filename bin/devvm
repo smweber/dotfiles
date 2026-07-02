@@ -1,0 +1,303 @@
+#!/usr/bin/env bash
+#
+# Small wrapper around smolvm for persistent, isolated development machines.
+# Run `smolvm --help` to see the underlying commands.
+
+set -euo pipefail
+
+IMAGE="ubuntu:24.04"
+CPUS=4
+STORAGE_GIB=50
+VM_USER="dev"
+
+usage() {
+    cat <<'EOF'
+Usage:
+  devvm create NAME [--memory MiB]
+                           Create and bootstrap a persistent agent VM
+  devvm shell NAME         Attach to the dev user's tmux session
+  devvm exec NAME CMD...   Run a command as the dev user
+  devvm auth NAME TOOL     Log in to github, codex, or claude
+  devvm repos NAME         Clone this VM's configured repositories
+  devvm port NAME H:G      Add host:guest port mapping (VM is restarted)
+  devvm start NAME
+  devvm stop NAME
+  devvm status [NAME]
+  devvm delete NAME
+
+Edit configure_machine() below to hardcode repositories and ports.
+EOF
+}
+
+die() {
+    echo "devvm: $*" >&2
+    exit 1
+}
+
+need_smolvm() {
+    command -v smolvm >/dev/null 2>&1 ||
+        die "smolvm is not installed; run bootstrap.sh on the host"
+}
+
+suggested_memory_mib() {
+    local total_mib
+
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        total_mib=$(( $(sysctl -n hw.memsize) / 1024 / 1024 ))
+    else
+        total_mib="$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)"
+    fi
+
+    local half_mib=$(( total_mib / 2 ))
+    if (( half_mib > 2048 )); then
+        echo 2048
+    elif (( half_mib < 1024 )); then
+        echo 1024
+    else
+        echo "$half_mib"
+    fi
+}
+
+choose_memory_mib() {
+    local requested="${1:-}"
+    local suggested
+    suggested="$(suggested_memory_mib)"
+
+    if [[ -z "$requested" ]]; then
+        if [[ ! -r /dev/tty ]]; then
+            die "no terminal available; pass --memory MiB"
+        fi
+        read -r -p "VM memory in MiB [$suggested]: " requested < /dev/tty
+        requested="${requested:-$suggested}"
+    fi
+
+    [[ "$requested" =~ ^[0-9]+$ ]] ||
+        die "memory must be an integer number of MiB"
+    (( requested >= 512 )) ||
+        die "memory must be at least 512 MiB"
+
+    echo "$requested"
+}
+
+# This is the only per-machine configuration. Repository values use the
+# OWNER/REPO form accepted by `gh repo clone`. Port values are HOST:GUEST.
+configure_machine() {
+    REPOS=()
+    PORTS=()
+
+    case "$1" in
+        # Example:
+        # client-a)
+        #     REPOS=("client/repo-one" "client/repo-two")
+        #     PORTS=("3000:3000" "5173:5173")
+        #     ;;
+        *)
+            ;;
+    esac
+}
+
+machine_exists() {
+    smolvm machine status --name "$1" >/dev/null 2>&1
+}
+
+as_dev() {
+    local name="$1"
+    shift
+    smolvm machine exec --name "$name" -- \
+        sudo -iu "$VM_USER" env SMOLVM_GUEST=1 "$@"
+}
+
+as_dev_interactive() {
+    local name="$1"
+    shift
+    smolvm machine exec -it --name "$name" -- \
+        sudo -iu "$VM_USER" env SMOLVM_GUEST=1 "$@"
+}
+
+create_machine() {
+    local name="$1"
+    local requested_memory="${2:-}"
+    local memory
+    memory="$(choose_memory_mib "$requested_memory")"
+    configure_machine "$name"
+
+    if machine_exists "$name"; then
+        die "machine '$name' already exists"
+    fi
+
+    local args=(
+        machine create
+        --name "$name"
+        --image "$IMAGE"
+        --net
+        --cpus "$CPUS"
+        --mem "$memory"
+        --storage "$STORAGE_GIB"
+        --env SMOLVM_GUEST=1
+    )
+    local mapping
+    for mapping in "${PORTS[@]}"; do
+        args+=(--port "$mapping")
+    done
+
+    echo "+ smolvm ${args[*]}"
+    echo "Using ${memory} MiB RAM."
+    smolvm "${args[@]}"
+    smolvm machine start --name "$name"
+
+    echo "Installing the minimal guest prerequisites..."
+    smolvm machine exec --name "$name" -- bash -lc "
+        apt-get update &&
+        DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential ca-certificates curl git sudo &&
+        if ! id -u '$VM_USER' >/dev/null 2>&1; then
+            useradd --create-home --shell /bin/bash '$VM_USER'
+        fi &&
+        printf '%s ALL=(ALL) NOPASSWD:ALL\n' '$VM_USER' \
+            >/etc/sudoers.d/devvm &&
+        chmod 0440 /etc/sudoers.d/devvm
+    "
+
+    echo "Cloning and running the agent-VM bootstrap..."
+    # $HOME must expand inside the guest as the dev user.
+    # shellcheck disable=SC2016
+    as_dev "$name" bash -lc '
+        if [[ ! -d "$HOME/.dotfiles" ]]; then
+            git clone https://github.com/smweber/dotfiles.git "$HOME/.dotfiles"
+        fi
+        ASSUME_YES=1 NONINTERACTIVE=1 "$HOME/.dotfiles/bootstrap.sh"
+    '
+
+    cat <<EOF
+
+Machine '$name' is ready.
+
+Next:
+  devvm auth $name github
+  devvm auth $name codex
+  devvm auth $name claude
+  devvm repos $name
+  devvm shell $name
+EOF
+}
+
+clone_repos() {
+    local name="$1"
+    configure_machine "$name"
+
+    if [[ ${#REPOS[@]} -eq 0 ]]; then
+        echo "No repositories configured for '$name'."
+        echo "Edit configure_machine() in $0."
+        return
+    fi
+
+    local repo
+    for repo in "${REPOS[@]}"; do
+        as_dev "$name" bash -lc \
+            "mkdir -p \"\$HOME/src\"; cd \"\$HOME/src\"; [[ -d \"${repo##*/}\" ]] || gh repo clone \"$repo\""
+    done
+}
+
+authenticate() {
+    local name="$1"
+    case "$2" in
+        github)
+            as_dev_interactive "$name" gh auth login
+            ;;
+        codex)
+            as_dev_interactive "$name" codex login
+            ;;
+        claude)
+            echo "Claude Code handles login when it starts. Use /login if prompted."
+            as_dev_interactive "$name" claude
+            ;;
+        *)
+            die "tool must be github, codex, or claude"
+            ;;
+    esac
+}
+
+main() {
+    local command="${1:-}"
+
+    case "$command" in
+        -h|--help|help|"")
+            usage
+            return
+            ;;
+    esac
+
+    need_smolvm
+
+    case "$command" in
+        create)
+            [[ $# -ge 2 ]] || die "usage: devvm create NAME [--memory MiB]"
+            local name="$2"
+            local memory=""
+            shift 2
+            while [[ $# -gt 0 ]]; do
+                case "$1" in
+                    -m|--memory)
+                        [[ $# -ge 2 ]] || die "$1 requires a MiB value"
+                        memory="$2"
+                        shift 2
+                        ;;
+                    *)
+                        die "unknown create option '$1'"
+                        ;;
+                esac
+            done
+            create_machine "$name" "$memory"
+            ;;
+        shell)
+            [[ $# -eq 2 ]] || die "usage: devvm shell NAME"
+            as_dev_interactive "$2" tmux new-session -A -s dev
+            ;;
+        exec)
+            [[ $# -ge 3 ]] || die "usage: devvm exec NAME CMD..."
+            local name="$2"
+            shift 2
+            as_dev "$name" "$@"
+            ;;
+        auth)
+            [[ $# -eq 3 ]] || die "usage: devvm auth NAME TOOL"
+            authenticate "$2" "$3"
+            ;;
+        repos)
+            [[ $# -eq 2 ]] || die "usage: devvm repos NAME"
+            clone_repos "$2"
+            ;;
+        port)
+            [[ $# -eq 3 ]] || die "usage: devvm port NAME HOST:GUEST"
+            smolvm machine stop --name "$2" 2>/dev/null || true
+            smolvm machine update --name "$2" --port "$3"
+            smolvm machine start --name "$2"
+            ;;
+        start)
+            [[ $# -eq 2 ]] || die "usage: devvm start NAME"
+            smolvm machine start --name "$2"
+            ;;
+        stop)
+            [[ $# -eq 2 ]] || die "usage: devvm stop NAME"
+            smolvm machine stop --name "$2"
+            ;;
+        status)
+            if [[ $# -eq 1 ]]; then
+                smolvm machine ls --verbose
+            elif [[ $# -eq 2 ]]; then
+                smolvm machine status --name "$2"
+            else
+                die "usage: devvm status [NAME]"
+            fi
+            ;;
+        delete)
+            [[ $# -eq 2 ]] || die "usage: devvm delete NAME"
+            smolvm machine delete --name "$2"
+            ;;
+        *)
+            die "unknown command '$command'; run devvm --help"
+            ;;
+    esac
+}
+
+main "$@"

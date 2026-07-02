@@ -3,7 +3,10 @@
 # Bootstrap script for fresh computer installs
 # https://github.com/smweber/dotfiles
 #
-# Run with: curl -fsSL https://raw.githubusercontent.com/smweber/dotfiles/master/bootstrap.sh | bash
+# Host:
+#   curl -fsSL https://raw.githubusercontent.com/smweber/dotfiles/master/bootstrap.sh | bash
+# Agent VM:
+#   bash bootstrap.sh --profile agent-vm
 #
 # Package lists live in Brewfile / Brewfile.macos (brew) and packages.sh
 # (stow / apt / flatpak). This script just orchestrates.
@@ -14,6 +17,7 @@
 set -uo pipefail
 
 DOTFILES="${DOTFILES:-$HOME/.dotfiles}"
+PROFILE="${BOOTSTRAP_PROFILE:-}"
 
 # ============================================================================
 # Helper Functions
@@ -84,6 +88,64 @@ run() {
 
 # Check if command exists
 has() { command -v "$1" &> /dev/null; }
+has_claude() {
+    has claude ||
+        [[ -x "$HOME/.local/bin/claude" ]] ||
+        [[ -x "$HOME/.claude/local/claude" ]]
+}
+
+usage() {
+    cat <<'EOF'
+Usage: bootstrap.sh [--profile host|agent-vm]
+
+  With no argument, SMOLVM_GUEST=1 selects agent-vm; otherwise host.
+  host      Normal laptop/VM setup. Installs smolvm, but no LLM agents.
+  agent-vm  Isolated development VM. Installs Claude Code and Codex.
+EOF
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --profile)
+                [[ $# -ge 2 ]] || { echo "--profile requires a value" >&2; exit 2; }
+                PROFILE="$2"
+                shift 2
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                echo "Unknown argument: $1" >&2
+                usage >&2
+                exit 2
+                ;;
+        esac
+    done
+
+    case "$PROFILE" in
+        "") ;;
+        host|agent-vm) ;;
+        *)
+            echo "Unknown profile: $PROFILE" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+}
+
+detect_profile() {
+    if [[ -n "$PROFILE" ]]; then
+        return
+    fi
+
+    if [[ "${SMOLVM_GUEST:-0}" == "1" ]]; then
+        PROFILE="agent-vm"
+    else
+        PROFILE="host"
+    fi
+}
 
 # Make brew available in this shell session (after install or if preinstalled)
 load_brew() {
@@ -101,6 +163,8 @@ load_brew() {
 # ============================================================================
 
 main() {
+    parse_args "$@"
+    detect_profile
     detect_os
 
     echo ""
@@ -109,6 +173,7 @@ main() {
     echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "Detected OS: ${BLUE}$OS${NC}"
+    echo -e "Bootstrap profile: ${BLUE}$PROFILE${NC}"
     if has_gui; then
         echo -e "GUI detected: ${BLUE}yes${NC}"
         HAS_GUI=true
@@ -120,7 +185,7 @@ main() {
     # -------------------------------------------------------------------------
     # Update package manager (Linux only)
     # -------------------------------------------------------------------------
-    if [[ "$OS" == "linux" ]] && has apt; then
+    if [[ "$PROFILE" == "host" ]] && [[ "$OS" == "linux" ]] && has apt; then
         step "Update system packages"
         if ask "Update and upgrade system packages (apt)?"; then
             run "sudo apt update"
@@ -131,14 +196,16 @@ main() {
     # -------------------------------------------------------------------------
     # Generate SSH key
     # -------------------------------------------------------------------------
-    step "SSH Key Setup"
-    if [[ -f ~/.ssh/id_ed25519 ]]; then
-        info "SSH key already exists at ~/.ssh/id_ed25519"
-    else
-        info "No SSH key found at ~/.ssh/id_ed25519"
-        if ask "Generate a new SSH key?"; then
-            read -p "Enter your email for the SSH key: " email < /dev/tty
-            run "ssh-keygen -t ed25519 -C \"$email\""
+    if [[ "$PROFILE" == "host" ]]; then
+        step "SSH Key Setup"
+        if [[ -f ~/.ssh/id_ed25519 ]]; then
+            info "SSH key already exists at ~/.ssh/id_ed25519"
+        else
+            info "No SSH key found at ~/.ssh/id_ed25519"
+            if ask "Generate a new SSH key?"; then
+                read -r -p "Enter your email for the SSH key: " email < /dev/tty
+                run "ssh-keygen -t ed25519 -C \"$email\""
+            fi
         fi
     fi
 
@@ -173,6 +240,8 @@ main() {
     else
         info "Homebrew provides GNU Stow (apt's is too old) and the Brewfile packages"
         if ask "Install Homebrew?"; then
+            # Expanded by the inner bash, not this shell.
+            # shellcheck disable=SC2016
             run '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
             load_brew
         fi
@@ -198,40 +267,40 @@ main() {
     # -------------------------------------------------------------------------
     # Add SSH key to GitHub, then use SSH for the dotfiles remote
     # -------------------------------------------------------------------------
-    step "Add SSH key to GitHub"
-    GITHUB_SSH_READY=false
-    if [[ -f ~/.ssh/id_ed25519.pub ]]; then
-        if has gh; then
-            if ask "Upload SSH key to GitHub via gh?"; then
-                if gh auth status &>/dev/null || run "gh auth login"; then
-                    LOCAL_SSH_KEY="$(awk '{print $1 " " $2}' ~/.ssh/id_ed25519.pub)"
-                    if gh api user/keys --paginate --jq '.[].key' 2>/dev/null |
-                        awk '{print $1 " " $2}' |
-                        grep -Fqx "$LOCAL_SSH_KEY"; then
-                        info "SSH key is already registered with GitHub"
-                        GITHUB_SSH_READY=true
-                    else
-                        if run "gh ssh-key add ~/.ssh/id_ed25519.pub --title \"$(hostname)\""; then
+    if [[ "$PROFILE" == "host" ]]; then
+        step "Add SSH key to GitHub"
+        GITHUB_SSH_READY=false
+        if [[ -f ~/.ssh/id_ed25519.pub ]]; then
+            if has gh; then
+                if ask "Upload SSH key to GitHub via gh?"; then
+                    if gh auth status &>/dev/null || run "gh auth login"; then
+                        LOCAL_SSH_KEY="$(awk '{print $1 " " $2}' ~/.ssh/id_ed25519.pub)"
+                        if gh api user/keys --paginate --jq '.[].key' 2>/dev/null |
+                            awk '{print $1 " " $2}' |
+                            grep -Fqx "$LOCAL_SSH_KEY"; then
+                            info "SSH key is already registered with GitHub"
+                            GITHUB_SSH_READY=true
+                        elif run "gh ssh-key add ~/.ssh/id_ed25519.pub --title \"$(hostname)\""; then
                             GITHUB_SSH_READY=true
                         fi
                     fi
                 fi
+            else
+                info "GitHub CLI not available; add this public key manually:"
+                echo ""
+                cat ~/.ssh/id_ed25519.pub
+                echo ""
+                info "https://github.com/settings/keys"
             fi
         else
-            info "GitHub CLI not available; add this public key manually:"
-            echo ""
-            cat ~/.ssh/id_ed25519.pub
-            echo ""
-            info "https://github.com/settings/keys"
+            info "No SSH public key found, skipping"
         fi
-    else
-        info "No SSH public key found, skipping"
-    fi
 
-    if [[ "$GITHUB_SSH_READY" == "true" ]] &&
-        [[ -d "$DOTFILES/.git" ]] &&
-        git -C "$DOTFILES" remote get-url origin &>/dev/null; then
-        run "git -C \"$DOTFILES\" remote set-url origin git@github.com:smweber/dotfiles.git"
+        if [[ "$GITHUB_SSH_READY" == "true" ]] &&
+            [[ -d "$DOTFILES/.git" ]] &&
+            git -C "$DOTFILES" remote get-url origin &>/dev/null; then
+            run "git -C \"$DOTFILES\" remote set-url origin git@github.com:smweber/dotfiles.git"
+        fi
     fi
 
     # -------------------------------------------------------------------------
@@ -276,7 +345,7 @@ main() {
     step "Install tmux plugins"
     if [[ -f ~/.tmux/plugins/tpm/bin/install_plugins ]]; then
         if ask "Install tmux plugins?"; then
-            run "~/.tmux/plugins/tpm/bin/install_plugins"
+            run "\"$HOME/.tmux/plugins/tpm/bin/install_plugins\""
         fi
     else
         info "TPM not found, skipping"
@@ -309,7 +378,73 @@ main() {
     elif ask "Set fish as your default login shell?"; then
         grep -qx "$FISH_PATH" /etc/shells 2>/dev/null || \
             run "echo '$FISH_PATH' | sudo tee -a /etc/shells >/dev/null"
-        run "chsh -s '$FISH_PATH'"
+        if [[ "$PROFILE" == "agent-vm" ]]; then
+            run "sudo chsh -s '$FISH_PATH' '$USER'"
+        else
+            run "chsh -s '$FISH_PATH'"
+        fi
+    fi
+
+    # -------------------------------------------------------------------------
+    # Profile-specific tools
+    # -------------------------------------------------------------------------
+    if [[ "$PROFILE" == "host" ]]; then
+        step "Install smolvm"
+        if has smolvm; then
+            info "smolvm is already installed"
+        elif ask "Install smolvm for isolated development VMs?"; then
+            run 'curl -sSL https://smolmachines.com/install.sh | bash'
+        fi
+    else
+        step "Install agent tools"
+        if ! has npm; then
+            run "brew install node"
+        fi
+
+        if has codex; then
+            info "Codex is already installed"
+        elif has npm && ask "Install Codex?"; then
+            run "npm install -g @openai/codex"
+        fi
+
+        if has_claude; then
+            info "Claude Code is already installed"
+        elif ask "Install Claude Code?"; then
+            run 'curl -fsSL https://claude.ai/install.sh | bash'
+        fi
+
+        if has_claude && has jq; then
+            step "Configure Claude Code statusline"
+            CLAUDE_SETTINGS="$HOME/.claude/settings.json"
+            STATUSLINE_COMMAND="$DOTFILES/bin/claude-statusline-command.sh"
+            mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
+            [[ -f "$CLAUDE_SETTINGS" ]] || printf '{}\n' > "$CLAUDE_SETTINGS"
+
+            if jq -e --arg command "$STATUSLINE_COMMAND" \
+                '.statusLine == {"type": "command", "command": $command}' \
+                "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
+                info "Claude Code statusline is already configured"
+            else
+                CLAUDE_SETTINGS_TMP="$(mktemp)"
+                if jq --arg command "$STATUSLINE_COMMAND" \
+                    '.statusLine = {"type": "command", "command": $command}' \
+                    "$CLAUDE_SETTINGS" > "$CLAUDE_SETTINGS_TMP"; then
+                    mv "$CLAUDE_SETTINGS_TMP" "$CLAUDE_SETTINGS"
+                    info "Configured Claude Code statusline"
+                else
+                    rm -f "$CLAUDE_SETTINGS_TMP"
+                    warn "Could not update $CLAUDE_SETTINGS (is it valid JSON?)"
+                    FAILED+=("configure Claude Code statusline")
+                fi
+            fi
+        elif has_claude; then
+            warn "jq not found; skipping Claude Code statusline configuration"
+        fi
+
+        info "Authenticate inside this VM when ready:"
+        info "  gh auth login"
+        info "  codex login"
+        info "  claude"
     fi
 
     # -------------------------------------------------------------------------
@@ -322,41 +457,6 @@ main() {
         if ask "Install Linux GUI packages?"; then
             run "sudo apt install -y $LINUX_GUI_APT"
         fi
-    fi
-
-    # -------------------------------------------------------------------------
-    # Install Claude Code
-    # -------------------------------------------------------------------------
-    step "Install Claude Code"
-    if has claude; then
-        info "Claude Code is already installed"
-    elif ask "Install Claude Code?"; then
-        run 'curl -fsSL https://claude.ai/install.sh | bash'
-    fi
-
-    # -------------------------------------------------------------------------
-    # Configure Claude Code statusline
-    # -------------------------------------------------------------------------
-    step "Configure Claude Code statusline"
-    CLAUDE_SETTINGS="$HOME/.claude/settings.json"
-    if [[ -f "$CLAUDE_SETTINGS" ]]; then
-        if python3 -c "import json; d=json.load(open('$CLAUDE_SETTINGS')); exit(0 if 'statusLine' in d else 1)" 2>/dev/null; then
-            info "statusLine already configured in $CLAUDE_SETTINGS"
-        else
-            info "Adding statusLine config to $CLAUDE_SETTINGS"
-            python3 - "$CLAUDE_SETTINGS" <<'EOF'
-import json, sys
-path = sys.argv[1]
-with open(path) as f:
-    d = json.load(f)
-d["statusLine"] = {"type": "command", "command": "~/.dotfiles/bin/claude-statusline-command.sh"}
-with open(path, "w") as f:
-    json.dump(d, f, indent=2)
-    f.write("\n")
-EOF
-        fi
-    else
-        info "~/.claude/settings.json not found - run after Claude Code is installed"
     fi
 
     # -------------------------------------------------------------------------
