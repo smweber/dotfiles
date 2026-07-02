@@ -77,8 +77,9 @@ host, where they open in the host's default browser; tools that ignore
 `$BROWSER` simply print the URL in the terminal as before. `devvm auth NAME`
 with no tool logs in to all of github, codex, and claude in turn. Since the
 outbox is a machine→host channel, the watcher only opens plain `http(s)` URLs
-(no `file://`, custom schemes, or option injection). codex completes its OAuth
-on a `127.0.0.1:1455` callback inside the machine, so authing codex routes the
+(no `file://`, custom schemes, or option injection). codex uses device auth when
+the installed CLI supports it. Older codex versions complete OAuth on a
+`127.0.0.1:1455` callback inside the machine, so only that fallback routes the
 host's `:1455` back in — a smol port mapping (one-time restart) or, for ssh, a
 transient `-L` on the login connection.
 Creation prompts for memory with a host-aware default capped at 2 GiB; pass

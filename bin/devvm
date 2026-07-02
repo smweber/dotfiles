@@ -733,6 +733,11 @@ clone_repos() {
 # option injection (a leading '-') a compromised guest could otherwise use.
 host_open_url() {
     local url="$1"
+    # OAuth CLIs commonly print `localhost`, which can resolve to ::1 on macOS.
+    # The VM callback mappings are IPv4 loopback, so prefer 127.0.0.1.
+    url="${url//localhost:1455/127.0.0.1:1455}"
+    url="${url//localhost%3A1455/127.0.0.1%3A1455}"
+    url="${url//localhost%3a1455/127.0.0.1%3A1455}"
     case "$url" in
         http://*|https://*) ;;
         *)
@@ -741,14 +746,13 @@ host_open_url() {
             ;;
     esac
     if [[ "$(uname -s)" == "Darwin" ]]; then
-        open "$url" >/dev/null 2>&1 || true
+        open "$url" >/dev/null 2>&1 && return 0
     elif command -v xdg-open >/dev/null 2>&1; then
-        xdg-open "$url" >/dev/null 2>&1 || true
+        xdg-open "$url" >/dev/null 2>&1 && return 0
     elif command -v wslview >/dev/null 2>&1; then # WSL
-        wslview "$url" >/dev/null 2>&1 || true
-    else
-        echo "devvm: open this URL in your browser: $url" >&2
+        wslview "$url" >/dev/null 2>&1 && return 0
     fi
+    echo "devvm: open this URL in your browser: $url" >&2
 }
 
 # Install a $BROWSER shim in the machine that appends URLs to ~/.devvm/urls
@@ -782,28 +786,30 @@ SH
     ' _ "$guest_helper"
 }
 
-# Tail the machine outbox and open each URL on the host. Runs until stopped.
+# Poll the machine outbox and open each URL on the host. Runs until stopped.
 start_url_watcher() {
     local name="$1"
-    URL_WATCHER_TOKEN="$$-${RANDOM:-0}"
-    m_run_stream "$name" bash -lc '
-        token="$1"
-        control="$HOME/.devvm/url-watcher"
-        outbox="$HOME/.devvm/urls"
-        printf "%s\n" "$token" > "$control"
-        while [[ -f "$control" && "$(cat "$control")" == "$token" ]]; do
-            if [[ -s "$outbox" ]]; then
-                cat "$outbox"
-                : > "$outbox"
+    (
+        local urls url
+        while :; do
+            urls="$(
+                m_run "$name" bash -lc '
+                    outbox="$HOME/.devvm/urls"
+                    [[ -s "$outbox" ]] || exit 0
+                    cat "$outbox"
+                    : > "$outbox"
+                ' 2>/dev/null || true
+            )"
+            if [[ -n "$urls" ]]; then
+                while IFS= read -r url; do
+                    [[ -n "$url" ]] || continue
+                    echo "devvm: opening on host -> $url" >&2
+                    host_open_url "$url"
+                done <<<"$urls"
             fi
             sleep 0.2
         done
-    ' _ "$URL_WATCHER_TOKEN" 2>/dev/null |
-        while IFS= read -r url; do
-            [[ -n "$url" ]] || continue
-            echo "devvm: opening on host -> $url" >&2
-            host_open_url "$url"
-        done &
+    ) &
     URL_WATCHER_PID=$!
     URL_WATCHER_MACHINE="$name"
 }
@@ -811,13 +817,8 @@ start_url_watcher() {
 stop_url_watcher() {
     [[ -n "${URL_WATCHER_PID:-}" ]] || return 0
     kill "$URL_WATCHER_PID" 2>/dev/null || true
-    # Signal the guest loop explicitly. smolvm detached exec contexts cannot
-    # be killed from later exec namespaces, but they can observe shared files.
-    m_run "$URL_WATCHER_MACHINE" bash -lc \
-        'rm -f "$HOME/.devvm/url-watcher"' 2>/dev/null || true
     wait "$URL_WATCHER_PID" 2>/dev/null || true
     URL_WATCHER_PID=""
-    URL_WATCHER_TOKEN=""
 }
 
 # Interactive login with the host-browser shim wired in as $BROWSER.
@@ -826,10 +827,16 @@ run_login() {
     m_run_it "$name" env BROWSER=devvm-open-url "$@"
 }
 
-# codex finishes OAuth via a callback on 127.0.0.1:1455 inside the machine.
-# Opening the URL on the host means the redirect lands on the host, so we route
-# the host's :1455 to the machine — smol via a (restarting) port mapping, ssh
-# via a transient -L on the login connection.
+# Older codex versions finish OAuth via a callback on 127.0.0.1:1455 inside
+# the machine. Prefer device auth when available; otherwise route the host's
+# :1455 to the machine — smol via a (restarting) port mapping, ssh via a
+# transient -L on the login connection.
+codex_supports_device_auth() {
+    local name="$1"
+    m_run "$name" bash -lc 'codex login --help 2>&1 | grep -q -- "--device-auth"' \
+        >/dev/null 2>&1
+}
+
 prepare_codex_callback() {
     local name="$1"
     case "$BACKEND" in
@@ -866,10 +873,16 @@ login_tool() {
     local name="$1" tool="$2"
     case "$tool" in
         github)
-            run_login "$name" bash -lc \
-                'gh auth login && gh auth setup-git'
+            run_login "$name" bash -lc 'unset GH_TOKEN GITHUB_TOKEN; gh auth login && gh auth setup-git'
             ;;
-        codex)  run_login "$name" codex login ;;
+        codex)
+            run_login "$name" bash -lc '
+                if codex login --help 2>&1 | grep -q -- "--device-auth"; then
+                    exec codex login --device-auth
+                fi
+                exec codex login
+            '
+            ;;
         claude)
             echo "Claude Code logs in on first launch; use /login if prompted." >&2
             run_login "$name" claude
@@ -894,7 +907,11 @@ authenticate() {
     echo "devvm: starting requested auth flow for '$name' ($tool)" >&2
 
     case "$tool" in
-        codex|all) prepare_codex_callback "$name" ;;
+        codex|all)
+            if ! codex_supports_device_auth "$name"; then
+                prepare_codex_callback "$name"
+            fi
+            ;;
     esac
 
     ensure_url_bridge "$name"
@@ -912,6 +929,10 @@ authenticate() {
             # Ctrl-C and other signal exits should abort the whole auth flow;
             # the EXIT trap then reaps the host and guest URL watchers.
             if ((status >= 128)); then
+                return "$status"
+            fi
+            if [[ "$t" == "codex" ]]; then
+                echo "devvm: codex login exited non-zero; stopping before claude" >&2
                 return "$status"
             fi
             echo "devvm: $t login exited non-zero; continuing" >&2
