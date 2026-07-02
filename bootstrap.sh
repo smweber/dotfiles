@@ -143,31 +143,6 @@ main() {
     fi
 
     # -------------------------------------------------------------------------
-    # Add SSH key to GitHub
-    # -------------------------------------------------------------------------
-    step "Add SSH key to GitHub"
-    if [[ -f ~/.ssh/id_ed25519.pub ]]; then
-        if has gh; then
-            if ask "Upload SSH key to GitHub via gh?"; then
-                gh auth status &>/dev/null || run "gh auth login"
-                run "gh ssh-key add ~/.ssh/id_ed25519.pub --title \"$(hostname)\""
-            fi
-        else
-            info "Your public SSH key:"
-            echo ""
-            cat ~/.ssh/id_ed25519.pub
-            echo ""
-            info "Add this key to GitHub: https://github.com/settings/keys"
-            if ask "Press Y when you've added the key to GitHub (or N to skip)"; then
-                info "Testing GitHub connection..."
-                ssh -T git@github.com 2>&1 || true
-            fi
-        fi
-    else
-        info "No SSH public key found, skipping"
-    fi
-
-    # -------------------------------------------------------------------------
     # Clone dotfiles repo
     # -------------------------------------------------------------------------
     step "Clone dotfiles repository"
@@ -176,7 +151,7 @@ main() {
     else
         info "This will clone smweber/dotfiles to $DOTFILES"
         if ask "Clone dotfiles repository?"; then
-            run "git clone git@github.com:smweber/dotfiles.git \"$DOTFILES\""
+            run "git clone https://github.com/smweber/dotfiles.git \"$DOTFILES\""
         fi
     fi
 
@@ -221,6 +196,45 @@ main() {
     fi
 
     # -------------------------------------------------------------------------
+    # Add SSH key to GitHub, then use SSH for the dotfiles remote
+    # -------------------------------------------------------------------------
+    step "Add SSH key to GitHub"
+    GITHUB_SSH_READY=false
+    if [[ -f ~/.ssh/id_ed25519.pub ]]; then
+        if has gh; then
+            if ask "Upload SSH key to GitHub via gh?"; then
+                if gh auth status &>/dev/null || run "gh auth login"; then
+                    LOCAL_SSH_KEY="$(awk '{print $1 " " $2}' ~/.ssh/id_ed25519.pub)"
+                    if gh api user/keys --paginate --jq '.[].key' 2>/dev/null |
+                        awk '{print $1 " " $2}' |
+                        grep -Fqx "$LOCAL_SSH_KEY"; then
+                        info "SSH key is already registered with GitHub"
+                        GITHUB_SSH_READY=true
+                    else
+                        if run "gh ssh-key add ~/.ssh/id_ed25519.pub --title \"$(hostname)\""; then
+                            GITHUB_SSH_READY=true
+                        fi
+                    fi
+                fi
+            fi
+        else
+            info "GitHub CLI not available; add this public key manually:"
+            echo ""
+            cat ~/.ssh/id_ed25519.pub
+            echo ""
+            info "https://github.com/settings/keys"
+        fi
+    else
+        info "No SSH public key found, skipping"
+    fi
+
+    if [[ "$GITHUB_SSH_READY" == "true" ]] &&
+        [[ -d "$DOTFILES/.git" ]] &&
+        git -C "$DOTFILES" remote get-url origin &>/dev/null; then
+        run "git -C \"$DOTFILES\" remote set-url origin git@github.com:smweber/dotfiles.git"
+    fi
+
+    # -------------------------------------------------------------------------
     # Stow dotfiles
     # -------------------------------------------------------------------------
     step "Stow dotfiles"
@@ -233,7 +247,15 @@ main() {
             for pkg in $ALL_STOW; do
                 if [[ -d "$pkg" ]]; then
                     info "Stowing $pkg..."
-                    stow --dotfiles --no-folding "$pkg" 2>/dev/null || warn "  $pkg: already stowed or conflict"
+                    if STOW_OUTPUT="$(stow --dotfiles --no-folding "$pkg" 2>&1)"; then
+                        [[ -n "$STOW_OUTPUT" ]] && info "$STOW_OUTPUT"
+                    else
+                        warn "$pkg: stow failed"
+                        while IFS= read -r line; do
+                            warn "  $line"
+                        done <<< "$STOW_OUTPUT"
+                        FAILED+=("stow --dotfiles --no-folding $pkg")
+                    fi
                 fi
             done
         fi
@@ -373,23 +395,28 @@ EOF
     # -------------------------------------------------------------------------
     # Done!
     # -------------------------------------------------------------------------
-    echo ""
-    echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║           Bootstrap Complete!                              ║${NC}"
-    echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
-    echo ""
-
     if [[ ${#FAILED[@]} -gt 0 ]]; then
+        echo ""
+        echo -e "${RED}Bootstrap completed with failures.${NC}"
+        echo ""
         warn "${#FAILED[@]} step(s) failed - review and re-run as needed:"
         for c in "${FAILED[@]}"; do
             echo -e "      ${RED}✗${NC} $c"
         done
+        echo ""
+    else
+        echo ""
+        echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${GREEN}║           Bootstrap Complete!                              ║${NC}"
+        echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
         echo ""
     fi
 
     info "Next steps:"
     info "  - Restart your terminal (or run: source ~/.profile)"
     echo ""
+
+    [[ ${#FAILED[@]} -eq 0 ]]
 }
 
 main "$@"
