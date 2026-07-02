@@ -28,3 +28,4 @@ brew "tree-sitter-cli"  # parser generator for nvim-treesitter (:TSUpdate)
 brew "btop"
 brew "tree"
 brew "jq"
+brew "socat"      # host end of devvm's dynamic smol port forwards
