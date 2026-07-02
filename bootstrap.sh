@@ -119,6 +119,22 @@ run_sh() {
 
 # Check if command exists
 has() { command -v "$1" &> /dev/null; }
+
+# stow aborts a whole package if any target is an existing *real* file (not a
+# symlink). Fresh systems ship skeleton files (Ubuntu's ~/.profile from
+# /etc/skel is the usual culprit) that collide with our dotfiles, so move any
+# such file aside first. With --dotfiles, a package path like sh/dot-profile
+# maps to ~/.profile, and dot-config/... to .config/..., so mirror that here.
+backup_stow_conflicts() {
+    local pkg="$1" src rel target
+    while IFS= read -r src; do
+        rel="$(printf '%s' "${src#"$pkg"/}" | sed -E 's,(^|/)dot-,\1.,g')"
+        target="$HOME/$rel"
+        [[ -e "$target" && ! -L "$target" ]] || continue
+        run mv "$target" "$target.before-dotfiles"
+    done < <(find "$pkg" -type f)
+}
+
 has_claude() {
     has claude ||
         [[ -x "$HOME/.local/bin/claude" ]] ||
@@ -425,6 +441,7 @@ main() {
             cd "$DOTFILES" || exit 1
             for pkg in $ALL_STOW; do
                 if [[ -d "$pkg" ]]; then
+                    backup_stow_conflicts "$pkg"
                     run stow --dotfiles --no-folding "$pkg"
                 else
                     warn "$pkg: no such directory in $DOTFILES, skipping"
