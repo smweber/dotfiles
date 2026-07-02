@@ -86,8 +86,11 @@ Creation prompts for memory with a host-aware default capped at 2 GiB; pass
 session. Subcommands, machine names, and auth tools tab-complete in fish.
 
 `devvm create` and `devvm bootstrap` copy the current host dotfiles checkout
-into the VM as a one-time archive, including uncommitted changes. Repository
-metadata and all other root-level hidden files/directories are excluded.
+into the VM as an archive, including uncommitted changes. Host repository
+metadata and all other root-level hidden files/directories are excluded. After
+provisioning, the snapshot is attached to the host checkout's GitHub origin as
+a colocated Jujutsu/Git repository; use `jj git fetch` and `jj git push`.
+Host-only or unpublished changes remain visible as VM working-copy changes.
 
 ### How it's organized
 
