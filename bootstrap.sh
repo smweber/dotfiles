@@ -263,6 +263,25 @@ main() {
     fi
 
     # -------------------------------------------------------------------------
+    # Install Homebrew (provides stow + cross-platform packages via Brewfile).
+    # Runs before the clone: on a fresh macOS install the Homebrew installer
+    # also installs the Xcode Command Line Tools, which provide git.
+    # -------------------------------------------------------------------------
+    step "Install Homebrew"
+    if load_brew; then
+        info "Homebrew is already installed"
+    else
+        info "Homebrew provides GNU Stow (apt's is too old) and the Brewfile packages"
+        [[ "$OS" == "macos" ]] && info "Also installs the Xcode Command Line Tools (git) if missing"
+        if ask "Install Homebrew?"; then
+            # Expanded by the inner bash, not this shell.
+            # shellcheck disable=SC2016
+            run_sh '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+            load_brew
+        fi
+    fi
+
+    # -------------------------------------------------------------------------
     # Clone dotfiles repo
     # -------------------------------------------------------------------------
     step "Clone dotfiles repository"
@@ -282,22 +301,6 @@ main() {
     else
         warn "packages.sh not found at $DOTFILES - clone the repo first. Aborting."
         exit 1
-    fi
-
-    # -------------------------------------------------------------------------
-    # Install Homebrew (provides stow + cross-platform packages via Brewfile)
-    # -------------------------------------------------------------------------
-    step "Install Homebrew"
-    if load_brew; then
-        info "Homebrew is already installed"
-    else
-        info "Homebrew provides GNU Stow (apt's is too old) and the Brewfile packages"
-        if ask "Install Homebrew?"; then
-            # Expanded by the inner bash, not this shell.
-            # shellcheck disable=SC2016
-            run_sh '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-            load_brew
-        fi
     fi
 
     # -------------------------------------------------------------------------
