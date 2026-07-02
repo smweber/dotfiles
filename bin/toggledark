@@ -6,12 +6,12 @@
 ALACRITTY_LIGHTTHEME="catppuccin_latte.toml"
 ALACRITTY_DARKTHEME="catppuccin.toml"
 
-TMUX_LIGHTTHEME="@catppuccin_flavour 'latte'"
-TMUX_DARKTHEME="@catppuccin_flavour 'frappe'"
+TMUX_LIGHTTHEME="@catppuccin_flavor 'latte'"
+TMUX_DARKTHEME="@catppuccin_flavor 'frappe'"
 
 VIMCONF="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/init.lua"
 ALACRITTYCONF="$HOME/.alacritty.toml"
-TMUXCONF="$HOME/.tmux.conf"
+TMUXCONF="$HOME/.tmux-catppuccin.conf" # standalone theme file (see dot-tmux.conf)
 THEME_MODE_FILE="$HOME/.theme_mode"
 
 # Get the actual files (follow symlinks)
@@ -105,5 +105,15 @@ else
   switch_vim_theme "dark"
 fi
 
-# Reload tmux configuration
-tmux source-file "$REAL_TMUXCONF"
+# Reload the tmux theme. catppuccin v2 bakes its palette/colors with `set -ogq`
+# (only-if-unset), so switching flavor requires clearing its options first.
+# Do it as ONE batched `source-file` (unset every catppuccin option, then load
+# the theme) so tmux repaints once - not once per option, which made the bar
+# rebuild slowly, element by element.
+if tmux info >/dev/null 2>&1; then
+  reload=$(mktemp)
+  tmux show-options -g 2>/dev/null | grep -oE '^@(thm_|_ctp|catppuccin_)[a-zA-Z0-9_]*' | sed 's/^/set -gu /' > "$reload"
+  echo "source-file $REAL_TMUXCONF" >> "$reload"
+  tmux source-file "$reload"
+  rm -f "$reload"
+fi
