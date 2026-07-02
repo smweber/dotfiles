@@ -216,10 +216,11 @@ smol_status() { need_smolvm; smolvm machine status --name "$1"; }
 # --- backend: ssh ----------------------------------------------------------
 
 # Shared port/identity/known_hosts flags for ssh-family commands, in SSH_FLAGS.
-# $1 is the port flag: -p for ssh/autossh, -P for scp.
+# The port travels as -o Port=N so the same flags fit ssh, scp, and autossh
+# (scp's -p means something else entirely).
 build_ssh_flags() {
     SSH_FLAGS=()
-    [[ "${SSH_PORT:-22}" != "22" ]] && SSH_FLAGS+=("$1" "$SSH_PORT")
+    [[ "${SSH_PORT:-22}" != "22" ]] && SSH_FLAGS+=(-o "Port=$SSH_PORT")
     [[ -n "${IDENTITY:-}" ]]        && SSH_FLAGS+=(-i "${IDENTITY/#\~/$HOME}")
     # Managed (non-unmanaged) hosts get an isolated, TOFU-pinned known_hosts.
     if [[ "${MANAGED_SSH:-}" == "1" ]]; then
@@ -231,7 +232,7 @@ build_ssh_flags() {
 
 # Build the shared ssh option array (SSH_BASE) from the loaded machine globals.
 build_ssh_base() {
-    build_ssh_flags -p
+    build_ssh_flags
     SSH_BASE=(ssh)
     if ((${#SSH_FLAGS[@]})); then SSH_BASE+=("${SSH_FLAGS[@]}"); fi
     # Reuse one connection for concurrent sessions (e.g. login + URL watcher).
@@ -276,7 +277,7 @@ ssh_run_stream() { ssh_run "$@"; }
 ssh_cp() {
     need_cmd scp
     local name="$1" src="$2" dest="$3"
-    build_ssh_flags -P
+    build_ssh_flags
     local -a o=(scp)
     if ((${#SSH_FLAGS[@]})); then o+=("${SSH_FLAGS[@]}"); fi
     "${o[@]}" "$src" "$SSH_HOST:$dest"
@@ -331,7 +332,7 @@ ssh_tunnel_up() {
         return 0
     fi
     ssh_forwards
-    build_ssh_flags -p
+    build_ssh_flags
     local -a args=(-M 0 -N -f
         -o ServerAliveInterval=30 -o ServerAliveCountMax=3
         -o ExitOnForwardFailure=yes)
@@ -674,7 +675,8 @@ authenticate() {
 
 # --- ssh identity / key management -----------------------------------------
 
-# Resolve a KEY spec (host-side) into RESOLVED_KEYS[].
+# Resolve a KEY spec (host-side) into RESOLVED_KEYS[]. Returns 1 (with a
+# stderr note) when the spec yields nothing; callers decide if that's fatal.
 resolve_pubkeys() {
     RESOLVED_KEYS=()
     local line f
@@ -696,18 +698,22 @@ resolve_pubkeys() {
             RESOLVED_KEYS+=("$*")
             ;;
         *)
-            [[ -f "$1" ]] || die "not a public-key file: $1"
+            if [[ ! -f "$1" ]]; then
+                echo "devvm: not a public-key file: $1" >&2
+                return 1
+            fi
             RESOLVED_KEYS+=("$(cat "$1")")
             ;;
     esac
-    ((${#RESOLVED_KEYS[@]})) || die "no public keys resolved"
+    if ((${#RESOLVED_KEYS[@]} == 0)); then
+        echo "devvm: no public keys resolved from '${*:-this host}'" >&2
+        return 1
+    fi
 }
 
-authorize_key() {
-    local name="$1"; shift
-    load_machine "$name"
-    require_ssh authorize-key
-    resolve_pubkeys "$@"
+# Append RESOLVED_KEYS to the machine's authorized_keys (deduplicated).
+push_authorized_keys() {
+    local name="$1"
     # The key travels as an argv element ($1), not spliced into the script:
     # both backends quote argv safely, and keys/comments may contain quotes.
     local key
@@ -723,18 +729,26 @@ authorize_key() {
     echo "devvm: authorized ${#RESOLVED_KEYS[@]} key(s) on '$name'"
 }
 
-# Seed authorized_keys from the machine's conf (used at bootstrap). Runs each
-# entry in a subshell so one bad source (e.g. a keyless github user, which
-# makes authorize_key die) warns instead of aborting the whole bootstrap.
+authorize_key() {
+    local name="$1"; shift
+    load_machine "$name"
+    require_ssh authorize-key
+    resolve_pubkeys "$@" || die "no keys to authorize"
+    push_authorized_keys "$name"
+}
+
+# Seed authorized_keys from the machine's conf (used at bootstrap). A source
+# that yields no keys (e.g. a keyless github user) warns and moves on rather
+# than aborting the bootstrap.
 seed_authorized_keys() {
     local name="$1" u f
     for u in $AUTHORIZED_KEYS_GITHUB; do
-        (authorize_key "$name" --from-github "$u") ||
-            echo "devvm: warning: no keys added for github user '$u'" >&2
+        resolve_pubkeys --from-github "$u" || continue
+        push_authorized_keys "$name"
     done
     for f in $AUTHORIZED_KEYS; do
-        (authorize_key "$name" "${f/#\~/$HOME}") ||
-            echo "devvm: warning: no keys added from '$f'" >&2
+        resolve_pubkeys "${f/#\~/$HOME}" || continue
+        push_authorized_keys "$name"
     done
 }
 
@@ -963,22 +977,20 @@ status_all() {
     while IFS= read -r name; do
         [[ -n "$name" ]] || continue
         seen+="$name "
-        # Probe in a subshell first: a malformed conf makes load_machine die,
-        # which must not take the whole listing down with it.
-        if ! (load_machine "$name") >/dev/null 2>&1; then
-            printf '%-20s %-8s %s\n' "$name" "?" "broken conf"
-            continue
-        fi
-        load_machine "$name"
-        local state
-        if [[ "$BACKEND" == "smol" ]]; then
-            state="$(smol_state_from_json "$name" "$smol_json")"
-        elif ssh_tunnel_running; then
-            state="tunnel up"
-        else
-            state="tunnel down"
-        fi
-        printf '%-20s %-8s %s\n' "$name" "$BACKEND" "$state"
+        # One subshell per row: a malformed conf makes load_machine die,
+        # which must fail just this row, not the whole listing.
+        (
+            load_machine "$name" 2>/dev/null
+            state=""
+            if [[ "$BACKEND" == "smol" ]]; then
+                state="$(smol_state_from_json "$name" "$smol_json")"
+            elif ssh_tunnel_running; then
+                state="tunnel up"
+            else
+                state="tunnel down"
+            fi
+            printf '%-20s %-8s %s\n' "$name" "$BACKEND" "$state"
+        ) || printf '%-20s %-8s %s\n' "$name" "?" "broken conf"
     done < <(list_machines)
 
     # Live smol machines that aren't in the registry.
@@ -1124,18 +1136,14 @@ main() {
             [[ $# -eq 2 ]] || die "usage: devvm bootstrap NAME"
             bootstrap_machine "$2"
             ;;
-        shell)
-            [[ $# -eq 2 ]] || die "usage: devvm shell NAME"
+        shell|ssh)
+            [[ $# -eq 2 ]] || die "usage: devvm $command NAME"
             load_machine "$2"
-            [[ "$BACKEND" == "smol" ]] ||
-                die "'$2' is a remote ($BACKEND) machine; use 'devvm ssh $2'"
-            m_run_it "$2" tmux new-session -A -s dev
-            ;;
-        ssh)
-            [[ $# -eq 2 ]] || die "usage: devvm ssh NAME"
-            load_machine "$2"
-            [[ "$BACKEND" == "ssh" ]] ||
-                die "'$2' is a local ($BACKEND) VM; use 'devvm shell $2'"
+            # shell attaches to local VMs, ssh to remote machines.
+            local want=smol other=ssh
+            [[ "$command" == "ssh" ]] && { want=ssh; other=shell; }
+            [[ "$BACKEND" == "$want" ]] ||
+                die "'$2' is a '$BACKEND' machine; use 'devvm $other $2'"
             m_run_it "$2" tmux new-session -A -s dev
             ;;
         exec)
