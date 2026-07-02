@@ -471,7 +471,19 @@ make_dotfiles_archive() {
     # Echoes the path to a fresh archive; caller removes it.
     local archive
     archive="$(mktemp /tmp/devvm-dotfiles.XXXXXX.tar.gz)"
-    tar --exclude='./.*' -czf "$archive" -C "$DOTFILES_DIR" .
+    # Archive non-hidden top-level entries plus the repository's .gitignore.
+    # BSD tar treats `--exclude=./.*` as matching the `.` archive root and
+    # emits an empty archive; explicit shell expansion is portable and also
+    # keeps host-local .git/.jj/.claude/.codex state out of guests.
+    (
+        cd "$DOTFILES_DIR"
+        local -a entries=(* .gitignore)
+        tar -czf "$archive" "${entries[@]}"
+    )
+    if ! tar -tzf "$archive" bootstrap.sh bin/devvm >/dev/null 2>&1; then
+        rm -f "$archive"
+        die "dotfiles archive is incomplete (missing bootstrap.sh or bin/devvm)"
+    fi
     echo "$archive"
 }
 
