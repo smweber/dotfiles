@@ -668,6 +668,99 @@ SH
     ' _ "$guest_helper"
 }
 
+# Replace this process with a one-shot nc listener on loopback family FAM (4|6)
+# and PORT, adapting to the local nc flavor. macOS/BSD nc and ncat take
+# `-4|-6 -l PORT`; GNU netcat (what `brew install netcat` ships) wants
+# `-l -p PORT` and binds a family via `-s ADDR`. Meant to be exec'd inside a
+# pipeline: stdin is served to the client, the client's request goes to stdout.
+nc_listen() {
+    local fam="$1" port="$2" addr
+    [[ "$fam" == 6 ]] && addr="::1" || addr="127.0.0.1"
+    if nc -h 2>&1 | grep -qi 'GNU netcat'; then
+        exec nc -l -p "$port" -s "$addr"
+    fi
+    exec nc -"$fam" -l "$port"
+}
+
+# Bridge one OAuth loopback callback from the host browser into the guest.
+#
+# Tools like Claude Code finish login by spinning up a callback server on a
+# *random* localhost port inside the guest, then having the browser redirect to
+# it. The host browser can't reach that guest port, and — unlike codex's fixed
+# 1455 — the random port can't be forwarded up front (and smol can't add a port
+# without a restart). So instead of forwarding, we listen on the same port on
+# the host, catch the browser's one-shot redirect, and replay it into the guest
+# with `curl`. Backend-agnostic: no port mapping, no VM restart.
+#
+# We deliberately do NOT rewrite the redirect_uri host (localhost stays
+# localhost) so the authorize-time and token-exchange redirect_uris still match;
+# to cover macOS resolving `localhost` to ::1 we just listen on both loopback
+# families and take whichever the browser hits.
+bridge_loopback_callback() {
+    local name="$1" port="$2"
+    if ! command -v nc >/dev/null 2>&1; then
+        echo "devvm: nc not found; can't auto-bridge the login callback." >&2
+        echo "       After authorizing, copy the http://localhost:$port/... URL" >&2
+        echo "       from your browser and run:" >&2
+        echo "         devvm exec $name curl -s '<paste-url>'" >&2
+        return 0
+    fi
+    (
+        local body resp dir req path i
+        body='<!doctype html><meta charset=utf-8><title>devvm login</title>'
+        body+='<body style="font:16px/1.6 system-ui;margin:3rem;max-width:34rem">'
+        body+='Login received — you can close this tab and return to your terminal.'
+        resp="$(printf 'HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %s\r\nConnection: close\r\n\r\n%s' "${#body}" "$body")"
+        dir="$(mktemp -d)"
+        # One connection each, either family; head -1 grabs the request line and
+        # closes the pipe so nc exits.
+        { printf '%s' "$resp" | nc_listen 4 "$port" 2>/dev/null | head -n 1 >"$dir/4"; } &
+        local p4=$!
+        { printf '%s' "$resp" | nc_listen 6 "$port" 2>/dev/null | head -n 1 >"$dir/6"; } &
+        local p6=$!
+        # Wait (bounded, ~600s) for whichever family the browser redirects to.
+        req=""
+        for ((i = 0; i < 3000; i++)); do
+            if [[ -s "$dir/4" ]]; then req="$(<"$dir/4")"; break; fi
+            if [[ -s "$dir/6" ]]; then req="$(<"$dir/6")"; break; fi
+            kill -0 "$p4" 2>/dev/null || kill -0 "$p6" 2>/dev/null || break
+            sleep 0.2
+        done
+        kill "$p4" "$p6" 2>/dev/null
+        rm -rf "$dir"
+        # req like: "GET /callback?code=...&state=... HTTP/1.1"
+        req="${req%$'\r'}"
+        path="${req#GET }"; path="${path%% HTTP/*}"
+        case "$path" in
+            /*) ;;
+            *) exit 0 ;;
+        esac
+        if m_run "$name" bash -lc 'exec curl -fsS "http://127.0.0.1:'"$port"'$1"' \
+                _ "$path" >/dev/null 2>&1; then
+            echo "devvm: bridged login callback into '"$name"' (port $port)." >&2
+        else
+            echo "devvm: callback relay to '"$name"' failed; copy the localhost URL" >&2
+            echo "       and run: devvm exec '"$name"' curl -s '<paste-url>'" >&2
+        fi
+    ) &
+}
+
+# If URL is an OAuth authorize link that hands back a localhost callback, stand
+# up a bridge for its port before we open it in the browser. codex's fixed 1455
+# has its own forward, so leave it alone.
+maybe_bridge_callback() {
+    local name="$1" url="$2" port
+    case "$url" in
+        *redirect_uri=*) ;;
+        *) return 0 ;;
+    esac
+    port="$(printf '%s' "$url" \
+        | grep -oiE '(localhost|127\.0\.0\.1)(%3a|:)[0-9]{2,5}' \
+        | grep -oE '[0-9]{2,5}$' | head -n 1)"
+    [[ -n "$port" && "$port" != "1455" ]] || return 0
+    bridge_loopback_callback "$name" "$port"
+}
+
 # Poll the machine outbox and open each URL on the host. Runs until stopped.
 start_url_watcher() {
     local name="$1"
@@ -685,6 +778,9 @@ start_url_watcher() {
             if [[ -n "$urls" ]]; then
                 while IFS= read -r url; do
                     [[ -n "$url" ]] || continue
+                    # Stand up a callback bridge (if the URL needs one) before
+                    # the browser can redirect back to it.
+                    maybe_bridge_callback "$name" "$url"
                     echo "devvm: opening on host -> $url" >&2
                     host_open_url "$url"
                 done <<<"$urls"
