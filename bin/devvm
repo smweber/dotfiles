@@ -388,11 +388,41 @@ check_ports() {
 
 ssh_mosh() {
     need_cmd mosh
-    if [[ -n "${MOSH_SERVER:-}" ]]; then
-        mosh --server="$MOSH_SERVER" "$SSH_HOST"
+
+    # Verify a configured absolute path on the remote host. Config can be
+    # shared by machines with different Homebrew prefixes, so fall back to the
+    # remote login environment rather than passing a stale path to mosh.
+    local server=""
+    if [[ -n "${MOSH_SERVER:-}" ]] &&
+        ssh_run "$MACHINE_NAME" test -x "$MOSH_SERVER"; then
+        server="$MOSH_SERVER"
     else
-        mosh "$SSH_HOST"
+        server="$(ssh_run "$MACHINE_NAME" bash -lc '
+            command -v mosh-server 2>/dev/null ||
+                for candidate in \
+                    /home/linuxbrew/.linuxbrew/bin/mosh-server \
+                    /opt/homebrew/bin/mosh-server \
+                    /usr/local/bin/mosh-server \
+                    /usr/bin/mosh-server
+                do
+                    [[ -x "$candidate" ]] && { printf "%s\n" "$candidate"; exit 0; }
+                done
+            exit 1
+        ')" || die "mosh-server was not found on '$MACHINE_NAME'"
+        if [[ -n "${MOSH_SERVER:-}" && "$server" != "$MOSH_SERVER" ]]; then
+            echo "devvm: configured mosh-server not executable; using $server" >&2
+        fi
     fi
+
+    # Mosh otherwise invokes plain `ssh`, losing devvm's configured port,
+    # identity, and managed known_hosts file.
+    build_ssh_flags
+    local ssh_command
+    printf -v ssh_command '%q ' ssh "${SSH_FLAGS[@]}"
+
+    echo "devvm: using $server; attaching tmux session 'dev'" >&2
+    mosh --ssh="$ssh_command" --server="$server" -- "$SSH_HOST" \
+        tmux new-session -A -s dev
 }
 
 ssh_vnc() {

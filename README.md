@@ -48,7 +48,8 @@ devvm status                       # list every machine + state
 # ssh machines
 devvm exec scottdev3 hostname
 devvm tunnel scottdev3             # autossh port forwards (up/down/status)
-devvm mosh scottdev3 ; devvm vnc scottdev3
+devvm mosh scottdev3              # roaming shell, attached to the dev tmux session
+devvm vnc scottdev3
 devvm authorize-key scottdev3       # prompt for a GitHub user and key labels
 devvm keys scottdev3
 devvm revoke-key scottdev3 laptop   # unique fingerprint/comment substring
