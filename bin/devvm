@@ -185,24 +185,36 @@ smol_run() {
     need_smolvm
     local name="$1"; shift
     smolvm machine exec --name "$name" -- \
-        sudo -u "$VM_USER" -H env SMOLVM_GUEST=1 \
-        bash -lc 'exec "$@"' _ "$@"
+        sh -c '
+            machine="$1"; user="$2"; shift 2
+            hostname "$machine" || exit
+            exec sudo -u "$user" -H env SMOLVM_GUEST=1 \
+                bash -lc '"'"'exec "$@"'"'"' _ "$@"
+        ' _ "$name" "$VM_USER" "$@"
 }
 
 smol_run_it() {
     need_smolvm
     local name="$1"; shift
     smolvm machine exec -it --name "$name" -- \
-        sudo -u "$VM_USER" -H env SMOLVM_GUEST=1 \
-        bash -lc 'exec "$@"' _ "$@"
+        sh -c '
+            machine="$1"; user="$2"; shift 2
+            hostname "$machine" || exit
+            exec sudo -u "$user" -H env SMOLVM_GUEST=1 \
+                bash -lc '"'"'exec "$@"'"'"' _ "$@"
+        ' _ "$name" "$VM_USER" "$@"
 }
 
 smol_run_stream() {
     need_smolvm
     local name="$1"; shift
     smolvm machine exec --stream --name "$name" -- \
-        sudo -u "$VM_USER" -H env SMOLVM_GUEST=1 \
-        bash -lc 'exec "$@"' _ "$@"
+        sh -c '
+            machine="$1"; user="$2"; shift 2
+            hostname "$machine" || exit
+            exec sudo -u "$user" -H env SMOLVM_GUEST=1 \
+                bash -lc '"'"'exec "$@"'"'"' _ "$@"
+        ' _ "$name" "$VM_USER" "$@"
 }
 
 smol_cp() {
@@ -491,6 +503,7 @@ smol_prepare_guest() {
     local name="$1"
     echo "Installing the minimal guest prerequisites..."
     smolvm machine exec --stream --name "$name" -- bash -lc "
+        hostname '$name' &&
         apt-get update &&
         DEBIAN_FRONTEND=noninteractive apt-get install -y \
             build-essential ca-certificates curl git sudo &&
@@ -501,10 +514,11 @@ smol_prepare_guest() {
         printf '%s ALL=(ALL) NOPASSWD:ALL\n' '$VM_USER' \
             >/etc/sudoers.d/devvm &&
         chmod 0440 /etc/sudoers.d/devvm &&
-        guest_hostname=\$(hostname) &&
+        printf '%s\n' '$name' >/etc/hostname &&
+        sed -i '/^127\\.0\\.1\\.1[[:space:]]/d' /etc/hosts &&
         {
-            grep -qE \"[[:space:]]\$guest_hostname([[:space:]]|\$)\" /etc/hosts ||
-                printf '127.0.1.1 %s\n' \"\$guest_hostname\" >>/etc/hosts
+            grep -qE '[[:space:]]$name([[:space:]]|\$)' /etc/hosts ||
+                printf '127.0.1.1 %s\n' '$name' >>/etc/hosts
         }
     "
 }
