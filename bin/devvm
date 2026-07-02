@@ -418,7 +418,11 @@ ssh_mosh() {
     # identity, and managed known_hosts file.
     build_ssh_flags
     local ssh_command
-    printf -v ssh_command '%q ' ssh "${SSH_FLAGS[@]}"
+    if ((${#SSH_FLAGS[@]})); then
+        printf -v ssh_command '%q ' ssh "${SSH_FLAGS[@]}"
+    else
+        ssh_command=ssh
+    fi
 
     echo "devvm: using $server; attaching tmux session 'dev'" >&2
     mosh --ssh="$ssh_command" --server="$server" -- "$SSH_HOST" \
@@ -945,6 +949,9 @@ revoke_key() {
             [[ -n "$key_id" ]] && protected_keys+=("$key_id")
         fi
     fi
+    # Bash 3.2 on macOS errors under `set -u` when an empty array is expanded.
+    # An empty sentinel is harmless in the remote protection comparison.
+    ((${#protected_keys[@]})) || protected_keys+=("")
     m_run "$name" bash -lc '
         f="$HOME/.ssh/authorized_keys"
         [[ -f "$f" ]] || { echo "devvm: no authorized_keys"; exit 0; }
@@ -1346,7 +1353,13 @@ complete_zsh() {
         else
             printf '%s\n' "$value"
         fi
-    done < <(complete_command "${context[@]}")
+    done < <(
+        if ((context_count > 0)); then
+            complete_command "${context[@]}"
+        else
+            complete_command
+        fi
+    )
 }
 
 # --- main ------------------------------------------------------------------
