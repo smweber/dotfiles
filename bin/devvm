@@ -1108,7 +1108,10 @@ login_tool() {
     local name="$1" tool="$2"
     case "$tool" in
         github)
-            run_login "$name" bash -lc 'unset GH_TOKEN GITHUB_TOKEN; gh auth login && gh auth setup-git'
+            # Pin git to HTTPS so `devvm repos` uses the login token. Guests are
+            # headless with no SSH key/known_hosts, so an SSH protocol pick would
+            # otherwise fail cloning with "Host key verification failed".
+            run_login "$name" bash -lc 'unset GH_TOKEN GITHUB_TOKEN; gh auth login && gh auth setup-git && gh config set git_protocol https --host github.com'
             ;;
         codex)
             run_login "$name" bash -lc '
