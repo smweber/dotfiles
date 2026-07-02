@@ -24,8 +24,9 @@ Each step is interactive—you can skip anything you don't need. Run
 `ASSUME_YES=1 bash bootstrap.sh` to accept every step non-interactively.
 
 The default `host` profile installs `smolvm` but no LLM agents. Machines
-created by `devvm` set `SMOLVM_GUEST=1`, so the same bootstrap automatically
-uses the `agent-vm` profile and installs Codex and Claude Code there.
+created by `devvm` contain `/etc/devvm-agent`, so the same bootstrap
+automatically uses the `agent-vm` profile and installs Codex and Claude Code
+there.
 
 ## Isolated development VMs
 
@@ -34,9 +35,9 @@ uses the `agent-vm` profile and installs Codex and Claude Code there.
 ```bash
 devvm create client-a
 devvm create client-b --memory 4096
-devvm auth client-a github
-devvm auth client-a codex
-devvm auth client-a claude
+devvm bootstrap client-a  # resume/rerun provisioning
+devvm auth client-a       # log in to github, codex, and claude
+devvm auth client-a codex # or just one tool
 devvm shell client-a
 
 devvm port client-a 3000:3000
@@ -47,15 +48,28 @@ devvm status
 Repositories and default port mappings are hardcoded in the readable
 `configure_machine()` function near the top of `bin/devvm`. Repositories live
 only on the VM's persistent disk; no host directories or SSH agent are mounted.
-GitHub authentication happens inside each VM with `gh auth login`.
+Authentication happens inside each VM. Because the guest has no browser,
+`devvm auth` points `$BROWSER` at a shim that streams login URLs back to the
+host, where they open in the host's default browser; tools that ignore
+`$BROWSER` simply print the URL in the terminal as before. `devvm auth NAME`
+with no tool logs in to all of github, codex, and claude in turn. Since the
+outbox is a guest→host channel, the watcher only opens plain `http(s)` URLs
+(no `file://`, custom schemes, or option injection). codex completes its OAuth
+on a guest-side `127.0.0.1:1455` callback, so authing codex first forwards
+`1455:1455` (a one-time VM restart) so the host redirect reaches the guest.
 Creation prompts for memory with a host-aware default capped at 2 GiB; pass
 `--memory MiB` to skip the prompt. `devvm shell` attaches to a persistent tmux
-session.
+session. Subcommands, machine names, and auth tools tab-complete in fish.
+
+`devvm create` and `devvm bootstrap` copy the current host dotfiles checkout
+into the VM as a one-time archive, including uncommitted changes. Repository
+metadata and all other root-level hidden files/directories are excluded.
 
 ### How it's organized
 
 - **`Brewfile`** / **`Brewfile.macos`** — declarative Homebrew package lists
   (formulae, casks, fonts), applied idempotently with `brew bundle`.
+- **`Brewfile.agent`** — Codex and Claude Code casks installed only in agent VMs.
 - **`packages.sh`** — single source of truth for stow packages plus the
   system packages Homebrew doesn't handle (Linux apt/flatpak). Sourced by
   both `bootstrap.sh` and `restow.sh`.

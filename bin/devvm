@@ -9,15 +9,21 @@ IMAGE="ubuntu:24.04"
 CPUS=4
 STORAGE_GIB=50
 VM_USER="dev"
+DOTFILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Guest file the in-VM browser shim appends login URLs to; the host watcher
+# (see start_url_watcher) tails it and opens each URL in the host browser.
+URL_OUTBOX="/home/$VM_USER/.devvm/urls"
 
 usage() {
     cat <<'EOF'
 Usage:
   devvm create NAME [--memory MiB]
                            Create and bootstrap a persistent agent VM
+  devvm bootstrap NAME     Resume or rerun guest provisioning
   devvm shell NAME         Attach to the dev user's tmux session
   devvm exec NAME CMD...   Run a command as the dev user
-  devvm auth NAME TOOL     Log in to github, codex, or claude
+  devvm auth NAME [TOOL]   Log in to github, codex, claude (or all if omitted).
+                           Login URLs are opened in the host browser.
   devvm repos NAME         Clone this VM's configured repositories
   devvm port NAME H:G      Add host:guest port mapping (VM is restarted)
   devvm start NAME
@@ -114,6 +120,69 @@ as_dev_interactive() {
         sudo -iu "$VM_USER" env SMOLVM_GUEST=1 "$@"
 }
 
+as_dev_stream() {
+    local name="$1"
+    shift
+    smolvm machine exec --stream --name "$name" -- \
+        sudo -iu "$VM_USER" env SMOLVM_GUEST=1 "$@"
+}
+
+bootstrap_machine() {
+    local name="$1"
+
+    echo "Installing the minimal guest prerequisites..."
+    smolvm machine exec --name "$name" -- bash -lc "
+        apt-get update &&
+        DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential ca-certificates curl git sudo &&
+        if ! id -u '$VM_USER' >/dev/null 2>&1; then
+            useradd --create-home --shell /bin/bash '$VM_USER'
+        fi &&
+        touch /etc/devvm-agent &&
+        printf '%s ALL=(ALL) NOPASSWD:ALL\n' '$VM_USER' \
+            >/etc/sudoers.d/devvm &&
+        chmod 0440 /etc/sudoers.d/devvm &&
+        guest_hostname=\$(hostname) &&
+        {
+            grep -qE \"[[:space:]]\$guest_hostname([[:space:]]|\$)\" /etc/hosts ||
+                printf '127.0.1.1 %s\n' \"\$guest_hostname\" >>/etc/hosts
+        }
+    "
+
+    echo "Copying the local dotfiles checkout into the VM..."
+    local archive
+    archive="$(mktemp /tmp/devvm-dotfiles.XXXXXX.tar.gz)"
+    # Expand the unique temporary path now so cleanup still works on failure.
+    # shellcheck disable=SC2064
+    trap "rm -f '$archive'" EXIT
+
+    tar \
+        --exclude='./.*' \
+        -czf "$archive" \
+        -C "$DOTFILES_DIR" .
+
+    smolvm machine cp \
+        "$archive" \
+        "$name:/workspace/devvm-dotfiles.tar.gz"
+    smolvm machine exec --name "$name" -- bash -lc "
+        rm -rf '/home/$VM_USER/.dotfiles' &&
+        mkdir -p '/home/$VM_USER/.dotfiles' &&
+        tar -xzf /workspace/devvm-dotfiles.tar.gz -C '/home/$VM_USER/.dotfiles' &&
+        chown -R '$VM_USER:$VM_USER' '/home/$VM_USER/.dotfiles' &&
+        if [[ -f '/home/$VM_USER/.profile' ]] &&
+            [[ ! -L '/home/$VM_USER/.profile' ]]; then
+            mv '/home/$VM_USER/.profile' '/home/$VM_USER/.profile.before-devvm'
+            chown '$VM_USER:$VM_USER' '/home/$VM_USER/.profile.before-devvm'
+        fi &&
+        rm -f /workspace/devvm-dotfiles.tar.gz
+    "
+    rm -f "$archive"
+    trap - EXIT
+
+    as_dev_stream "$name" "/home/$VM_USER/.dotfiles/bootstrap.sh" \
+        --profile agent-vm --yes
+}
+
 create_machine() {
     local name="$1"
     local requested_memory="${2:-}"
@@ -135,47 +204,28 @@ create_machine() {
         --storage "$STORAGE_GIB"
         --env SMOLVM_GUEST=1
     )
-    local mapping
-    for mapping in "${PORTS[@]}"; do
-        args+=(--port "$mapping")
-    done
+    # Guard the expansion: an empty array under `set -u` is an error on
+    # bash < 4.4 (e.g. stock macOS bash 3.2).
+    if ((${#PORTS[@]})); then
+        local mapping
+        for mapping in "${PORTS[@]}"; do
+            args+=(--port "$mapping")
+        done
+    fi
 
     echo "+ smolvm ${args[*]}"
     echo "Using ${memory} MiB RAM."
     smolvm "${args[@]}"
     smolvm machine start --name "$name"
 
-    echo "Installing the minimal guest prerequisites..."
-    smolvm machine exec --name "$name" -- bash -lc "
-        apt-get update &&
-        DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            build-essential ca-certificates curl git sudo &&
-        if ! id -u '$VM_USER' >/dev/null 2>&1; then
-            useradd --create-home --shell /bin/bash '$VM_USER'
-        fi &&
-        printf '%s ALL=(ALL) NOPASSWD:ALL\n' '$VM_USER' \
-            >/etc/sudoers.d/devvm &&
-        chmod 0440 /etc/sudoers.d/devvm
-    "
-
-    echo "Cloning and running the agent-VM bootstrap..."
-    # $HOME must expand inside the guest as the dev user.
-    # shellcheck disable=SC2016
-    as_dev "$name" bash -lc '
-        if [[ ! -d "$HOME/.dotfiles" ]]; then
-            git clone https://github.com/smweber/dotfiles.git "$HOME/.dotfiles"
-        fi
-        ASSUME_YES=1 NONINTERACTIVE=1 "$HOME/.dotfiles/bootstrap.sh"
-    '
+    bootstrap_machine "$name"
 
     cat <<EOF
 
 Machine '$name' is ready.
 
 Next:
-  devvm auth $name github
-  devvm auth $name codex
-  devvm auth $name claude
+  devvm auth $name        # log in to github, codex, and claude
   devvm repos $name
   devvm shell $name
 EOF
@@ -198,29 +248,232 @@ clone_repos() {
     done
 }
 
-authenticate() {
-    local name="$1"
-    case "$2" in
-        github)
-            as_dev_interactive "$name" gh auth login
-            ;;
-        codex)
-            as_dev_interactive "$name" codex login
-            ;;
-        claude)
-            echo "Claude Code handles login when it starts. Use /login if prompted."
-            as_dev_interactive "$name" claude
-            ;;
+# Open a URL in the host's default browser. The VM has no browser, so login
+# flows inside the guest hand their URL back out through this.
+#
+# This is a guest->host channel, so treat the input as untrusted: only open
+# plain http(s) URLs. That blocks file://, mailto:, custom scheme handlers, and
+# option injection (a leading '-') that a compromised guest could otherwise use
+# to drive the host during an auth session.
+host_open_url() {
+    local url="$1"
+    case "$url" in
+        http://*|https://*) ;;
         *)
-            die "tool must be github, codex, or claude"
+            echo "devvm: refusing to open non-http(s) URL from guest: $url" >&2
+            return 0
             ;;
     esac
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        open "$url" >/dev/null 2>&1 || true
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$url" >/dev/null 2>&1 || true
+    elif command -v wslview >/dev/null 2>&1; then # WSL
+        wslview "$url" >/dev/null 2>&1 || true
+    else
+        echo "devvm: open this URL in your browser: $url" >&2
+    fi
+}
+
+# Install a $BROWSER shim in the guest that appends URLs to $URL_OUTBOX instead
+# of trying to launch a (non-existent) browser, and start the outbox empty.
+ensure_url_bridge() {
+    local name="$1"
+    local helper
+    helper="$(mktemp)"
+    cat >"$helper" <<'SH'
+#!/usr/bin/env bash
+# Installed by devvm: forward login URLs to the host browser.
+mkdir -p "$HOME/.devvm"
+printf '%s\n' "$1" >> "$HOME/.devvm/urls"
+echo "devvm: sent to host browser -> $1" >&2
+SH
+    smolvm machine cp "$helper" "$name:/usr/local/bin/devvm-open-url"
+    rm -f "$helper"
+    smolvm machine exec --name "$name" -- bash -lc "
+        chmod 0755 /usr/local/bin/devvm-open-url &&
+        install -d -o '$VM_USER' -g '$VM_USER' -m 700 '/home/$VM_USER/.devvm' &&
+        : > '$URL_OUTBOX' &&
+        chown '$VM_USER:$VM_USER' '$URL_OUTBOX'
+    "
+}
+
+# Tail the guest outbox and open each URL on the host. Runs until stopped.
+start_url_watcher() {
+    local name="$1"
+    smolvm machine exec --stream --name "$name" -- \
+        bash -lc "exec tail -F -n +1 '$URL_OUTBOX'" 2>/dev/null |
+        while IFS= read -r url; do
+            [[ -n "$url" ]] || continue
+            echo "devvm: opening on host -> $url" >&2
+            host_open_url "$url"
+        done &
+    URL_WATCHER_PID=$!
+    URL_WATCHER_MACHINE="$name"
+}
+
+stop_url_watcher() {
+    [[ -n "${URL_WATCHER_PID:-}" ]] || return 0
+    kill "$URL_WATCHER_PID" 2>/dev/null || true
+    wait "$URL_WATCHER_PID" 2>/dev/null || true
+    # smolvm doesn't propagate the kill to the guest, so reap the tail too.
+    smolvm machine exec --name "$URL_WATCHER_MACHINE" -- \
+        pkill -f "tail -F -n \+1 $URL_OUTBOX" 2>/dev/null || true
+    URL_WATCHER_PID=""
+}
+
+# Run an interactive login with the host-browser shim wired in as $BROWSER.
+run_login() {
+    local name="$1"
+    shift
+    smolvm machine exec -it --name "$name" -- \
+        sudo -iu "$VM_USER" env SMOLVM_GUEST=1 BROWSER=devvm-open-url "$@"
+}
+
+# True if HOST:GUEST is already forwarded, so we can avoid a needless restart.
+# smolvm exposes only a port *count* via the CLI, so read the machine's own
+# on-disk config instead.
+port_already_mapped() {
+    local name="$1" mapping="$2"
+    local dd config
+    dd="$(smolvm machine data-dir --name "$name" 2>/dev/null)" || return 1
+    config="$dd/agent.config.json"
+    [[ -f "$config" ]] || return 1
+    local host="${mapping%%:*}" guest="${mapping##*:}"
+    grep -qw "$host" "$config" && grep -qw "$guest" "$config"
+}
+
+# Ensure a HOST:GUEST port is forwarded. Ports can only change on a stopped
+# machine, so this restarts the VM (and drops any live tmux session).
+ensure_port() {
+    local name="$1" mapping="$2"
+    if port_already_mapped "$name" "$mapping"; then
+        return 0
+    fi
+    echo "devvm: forwarding $mapping for the login callback (restarting VM)..." >&2
+    smolvm machine stop --name "$name" 2>/dev/null || true
+    smolvm machine update --name "$name" --port "$mapping"
+    smolvm machine start --name "$name"
+}
+
+login_tool() {
+    local name="$1" tool="$2"
+    case "$tool" in
+        github)
+            run_login "$name" gh auth login
+            ;;
+        codex)
+            run_login "$name" codex login
+            ;;
+        claude)
+            echo "Claude Code logs in on first launch; use /login if prompted." >&2
+            run_login "$name" claude
+            ;;
+    esac
+}
+
+authenticate() {
+    local name="$1" tool="$2"
+    case "$tool" in
+        github|codex|claude|all) ;;
+        *) die "tool must be github, codex, claude, or all" ;;
+    esac
+
+    # codex completes OAuth through a callback on guest 127.0.0.1:1455. Opening
+    # the URL on the host means the redirect lands on the host, so forward the
+    # port back to the guest first. (Must happen before the watcher: forwarding
+    # restarts the VM.)
+    case "$tool" in
+        codex|all) ensure_port "$name" "1455:1455" ;;
+    esac
+
+    ensure_url_bridge "$name"
+    start_url_watcher "$name"
+    trap 'stop_url_watcher' EXIT
+
+    if [[ "$tool" == all ]]; then
+        local t
+        for t in github codex claude; do
+            login_tool "$name" "$t" ||
+                echo "devvm: $t login exited non-zero; continuing" >&2
+        done
+    else
+        login_tool "$name" "$tool"
+    fi
+
+    stop_url_watcher
+    trap - EXIT
+}
+
+# Emit machine names (with state as a tab-separated description) for shell
+# completion. Best-effort: prints nothing if smolvm or jq is unavailable.
+complete_machines() {
+    if command -v jq >/dev/null 2>&1; then
+        smolvm machine ls --json 2>/dev/null |
+            jq -r '.[] | "\(.name)\t\(.state)"' 2>/dev/null || true
+    else
+        smolvm machine ls --json 2>/dev/null |
+            grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]*"' |
+            sed -E 's/.*"([^"]*)"$/\1/' || true
+    fi
+}
+
+# Completion backend. Receives the tokens already typed after `devvm` and
+# prints candidates (optionally "value<TAB>description") for the next token.
+# Shell completion files just forward the command line here.
+complete_command() {
+    local -a words=("$@")
+    local n=${#words[@]}
+    local sub="${words[0]:-}"
+
+    if (( n == 0 )); then
+        printf '%b' \
+            'create\tCreate and bootstrap a VM\n' \
+            'bootstrap\tResume/rerun guest provisioning\n' \
+            'shell\tAttach to the dev tmux session\n' \
+            'exec\tRun a command as the dev user\n' \
+            'auth\tLog in to github, codex, claude\n' \
+            'repos\tClone configured repositories\n' \
+            'port\tAdd a host:guest port mapping\n' \
+            'start\tStart the VM\n' \
+            'stop\tStop the VM\n' \
+            'status\tShow VM status\n' \
+            'delete\tDelete the VM\n' \
+            'help\tShow help\n'
+        return 0
+    fi
+
+    case "$sub" in
+        auth)
+            if (( n == 1 )); then
+                complete_machines
+            elif (( n == 2 )); then
+                printf '%s\n' github codex claude all
+            fi
+            ;;
+        bootstrap|shell|exec|repos|port|start|stop|status|delete)
+            if (( n == 1 )); then
+                complete_machines
+            fi
+            ;;
+        create)
+            if (( n >= 2 )); then
+                printf '%b' '-m\tVM memory in MiB\n' '--memory\tVM memory in MiB\n'
+            fi
+            ;;
+    esac
+    return 0
 }
 
 main() {
     local command="${1:-}"
 
     case "$command" in
+        __complete)
+            shift
+            complete_command "$@"
+            return
+            ;;
         -h|--help|help|"")
             usage
             return
@@ -249,6 +502,10 @@ main() {
             done
             create_machine "$name" "$memory"
             ;;
+        bootstrap)
+            [[ $# -eq 2 ]] || die "usage: devvm bootstrap NAME"
+            bootstrap_machine "$2"
+            ;;
         shell)
             [[ $# -eq 2 ]] || die "usage: devvm shell NAME"
             as_dev_interactive "$2" tmux new-session -A -s dev
@@ -260,8 +517,9 @@ main() {
             as_dev "$name" "$@"
             ;;
         auth)
-            [[ $# -eq 3 ]] || die "usage: devvm auth NAME TOOL"
-            authenticate "$2" "$3"
+            [[ $# -ge 2 && $# -le 3 ]] ||
+                die "usage: devvm auth NAME [github|codex|claude|all]"
+            authenticate "$2" "${3:-all}"
             ;;
         repos)
             [[ $# -eq 2 ]] || die "usage: devvm repos NAME"

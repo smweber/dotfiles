@@ -96,11 +96,12 @@ has_claude() {
 
 usage() {
     cat <<'EOF'
-Usage: bootstrap.sh [--profile host|agent-vm]
+Usage: bootstrap.sh [--profile host|agent-vm] [--yes]
 
-  With no argument, SMOLVM_GUEST=1 selects agent-vm; otherwise host.
+  With no argument, /etc/devvm-agent or SMOLVM_GUEST=1 selects agent-vm.
   host      Normal laptop/VM setup. Installs smolvm, but no LLM agents.
   agent-vm  Isolated development VM. Installs Claude Code and Codex.
+  --yes     Accept bootstrap questions non-interactively.
 EOF
 }
 
@@ -111,6 +112,12 @@ parse_args() {
                 [[ $# -ge 2 ]] || { echo "--profile requires a value" >&2; exit 2; }
                 PROFILE="$2"
                 shift 2
+                ;;
+            --yes)
+                ASSUME_YES=1
+                NONINTERACTIVE=1
+                export ASSUME_YES NONINTERACTIVE
+                shift
                 ;;
             -h|--help)
                 usage
@@ -140,7 +147,7 @@ detect_profile() {
         return
     fi
 
-    if [[ "${SMOLVM_GUEST:-0}" == "1" ]]; then
+    if [[ -f /etc/devvm-agent ]] || [[ "${SMOLVM_GUEST:-0}" == "1" ]]; then
         PROFILE="agent-vm"
     else
         PROFILE="host"
@@ -254,10 +261,14 @@ main() {
         step "Install packages via Homebrew (brew bundle)"
         info "Common packages: $DOTFILES/Brewfile"
         [[ "$OS" == "macos" ]] && info "macOS packages/casks: $DOTFILES/Brewfile.macos"
+        [[ "$PROFILE" == "agent-vm" ]] && info "Agent tools: $DOTFILES/Brewfile.agent"
         if ask "Run brew bundle?"; then
             run "brew bundle --file \"$DOTFILES/Brewfile\""
             if [[ "$OS" == "macos" ]]; then
                 run "brew bundle --file \"$DOTFILES/Brewfile.macos\""
+            fi
+            if [[ "$PROFILE" == "agent-vm" ]]; then
+                run "brew bundle --file \"$DOTFILES/Brewfile.agent\""
             fi
         fi
     else
@@ -397,20 +408,16 @@ main() {
         fi
     else
         step "Install agent tools"
-        if ! has npm; then
-            run "brew install node"
-        fi
-
         if has codex; then
             info "Codex is already installed"
-        elif has npm && ask "Install Codex?"; then
-            run "npm install -g @openai/codex"
+        else
+            warn "Codex was not installed by Brewfile.agent"
         fi
 
         if has_claude; then
             info "Claude Code is already installed"
-        elif ask "Install Claude Code?"; then
-            run 'curl -fsSL https://claude.ai/install.sh | bash'
+        else
+            warn "Claude Code was not installed by Brewfile.agent"
         fi
 
         if has_claude && has jq; then
