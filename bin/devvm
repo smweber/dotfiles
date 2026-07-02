@@ -567,6 +567,14 @@ smol_prepare_guest() {
         {
             grep -qE '[[:space:]]$name([[:space:]]|\$)' /etc/hosts ||
                 printf '127.0.1.1 %s\n' '$name' >>/etc/hosts
+        } &&
+        # smol's macOS NAT is IPv4-only: guests get an IPv6 SLAAC address with
+        # no working route, so AAAA-first hosts (e.g. api.anthropic.com) reset
+        # connections from Node tools like Claude Code that don't fall back to
+        # v4. Bump IPv4-mapped precedence so getaddrinfo prefers IPv4.
+        {
+            grep -qs '^precedence ::ffff:0:0/96  100' /etc/gai.conf ||
+                printf 'precedence ::ffff:0:0/96  100\n' >>/etc/gai.conf
         }
     "
 }
