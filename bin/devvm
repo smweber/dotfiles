@@ -196,7 +196,9 @@ smol_run() {
 smol_run_it() {
     need_smolvm
     local name="$1"; shift
-    smolvm machine exec -it --name "$name" -- \
+    local term="${TERM:-xterm-256color}"
+    [[ "$term" == "unknown" || "$term" == "dumb" ]] && term="xterm-256color"
+    smolvm machine exec -it --name "$name" -e "TERM=$term" -- \
         sh -c '
             machine="$1"; user="$2"; shift 2
             hostname "$machine" || exit
@@ -244,7 +246,7 @@ smol_ensure_tmux() {
         tmux -S "$socket" new-session -d -s dev
         exec tmux -S "$socket" wait-for devvm-keeper-stop
     '
-    smolvm machine exec -d --name "$name" -- sh -c '
+    smolvm machine exec -d --name "$name" -e TERM=xterm-256color -- sh -c '
         machine="$1"; user="$2"; script="$3"; socket="$4"
         hostname "$machine" || exit
         exec sudo -u "$user" -H env SMOLVM_GUEST=1 \
@@ -783,7 +785,20 @@ SH
 # Tail the machine outbox and open each URL on the host. Runs until stopped.
 start_url_watcher() {
     local name="$1"
-    m_run_stream "$name" bash -lc "exec tail -F -n +1 \"\$HOME/.devvm/urls\"" 2>/dev/null |
+    URL_WATCHER_TOKEN="$$-${RANDOM:-0}"
+    m_run_stream "$name" bash -lc '
+        token="$1"
+        control="$HOME/.devvm/url-watcher"
+        outbox="$HOME/.devvm/urls"
+        printf "%s\n" "$token" > "$control"
+        while [[ -f "$control" && "$(cat "$control")" == "$token" ]]; do
+            if [[ -s "$outbox" ]]; then
+                cat "$outbox"
+                : > "$outbox"
+            fi
+            sleep 0.2
+        done
+    ' _ "$URL_WATCHER_TOKEN" 2>/dev/null |
         while IFS= read -r url; do
             [[ -n "$url" ]] || continue
             echo "devvm: opening on host -> $url" >&2
@@ -796,11 +811,13 @@ start_url_watcher() {
 stop_url_watcher() {
     [[ -n "${URL_WATCHER_PID:-}" ]] || return 0
     kill "$URL_WATCHER_PID" 2>/dev/null || true
-    wait "$URL_WATCHER_PID" 2>/dev/null || true
-    # The remote tail is a separate process; reap it too.
+    # Signal the guest loop explicitly. smolvm detached exec contexts cannot
+    # be killed from later exec namespaces, but they can observe shared files.
     m_run "$URL_WATCHER_MACHINE" bash -lc \
-        'pkill -f "tail -F -n +1 $HOME/.devvm/urls"' 2>/dev/null || true
+        'rm -f "$HOME/.devvm/url-watcher"' 2>/dev/null || true
+    wait "$URL_WATCHER_PID" 2>/dev/null || true
     URL_WATCHER_PID=""
+    URL_WATCHER_TOKEN=""
 }
 
 # Interactive login with the host-browser shim wired in as $BROWSER.
@@ -868,6 +885,14 @@ authenticate() {
     esac
     load_machine "$name"
 
+    registry_dir
+    local parent_command
+    parent_command="$(ps -o comm= -p "$PPID" 2>/dev/null || printf unknown)"
+    printf '%s pid=%s ppid=%s parent=%s machine=%s tool=%s\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "$PPID" \
+        "$parent_command" "$name" "$tool" >>"$CONFIG_DIR/auth-invocations.log"
+    echo "devvm: starting requested auth flow for '$name' ($tool)" >&2
+
     case "$tool" in
         codex|all) prepare_codex_callback "$name" ;;
     esac
@@ -877,10 +902,19 @@ authenticate() {
     trap 'stop_url_watcher' EXIT
 
     if [[ "$tool" == "all" ]]; then
-        local t
+        local t status
         for t in github codex claude; do
-            login_tool "$name" "$t" ||
-                echo "devvm: $t login exited non-zero; continuing" >&2
+            if login_tool "$name" "$t"; then
+                continue
+            else
+                status=$?
+            fi
+            # Ctrl-C and other signal exits should abort the whole auth flow;
+            # the EXIT trap then reaps the host and guest URL watchers.
+            if ((status >= 128)); then
+                return "$status"
+            fi
+            echo "devvm: $t login exited non-zero; continuing" >&2
         done
     else
         login_tool "$name" "$tool"
