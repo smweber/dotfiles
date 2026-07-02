@@ -425,8 +425,13 @@ ssh_mosh() {
     fi
 
     echo "devvm: using $server; attaching tmux session 'dev'" >&2
+    # mosh-server runs commands without a login shell, so PATH may contain
+    # only system directories. Keep Homebrew's tmux/fish visible; otherwise
+    # tmux's `default-command "/usr/bin/env fish"` immediately exits.
+    local server_dir="${server%/*}"
+    local remote_path="$server_dir:/home/linuxbrew/.linuxbrew/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
     mosh --ssh="$ssh_command" --server="$server" -- "$SSH_HOST" \
-        tmux new-session -A -s dev
+        env "PATH=$remote_path" tmux new-session -A -s dev
 }
 
 ssh_vnc() {
