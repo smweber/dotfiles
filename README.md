@@ -49,8 +49,10 @@ devvm status                       # list every machine + state
 devvm exec scottdev3 hostname
 devvm tunnel scottdev3             # autossh port forwards (up/down/status)
 devvm mosh scottdev3 ; devvm vnc scottdev3
-devvm authorize-key scottdev3 --from-github sweber   # add a client key
-devvm keys scottdev3 ; devvm revoke-key scottdev3 laptop
+devvm authorize-key scottdev3       # prompt for a GitHub user and key labels
+devvm keys scottdev3
+devvm revoke-key scottdev3 laptop   # unique fingerprint/comment substring
+devvm cleanup-keys scottdev3        # remove duplicates and the machine's own keys
 devvm lockdown scottdev3           # firewall + sshd hardening (opt-in)
 ```
 
@@ -61,7 +63,7 @@ the machine's disk; no host directories or SSH agent are mounted.
 
 For ssh/cloud machines, `authorized_keys` is seeded at bootstrap from
 `AUTHORIZED_KEYS_GITHUB` (GitHub `.keys`) / `AUTHORIZED_KEYS`, and managed later
-with `authorize-key` / `keys` / `revoke-key` — the model for reaching one box
+with `authorize-key` / `keys` / `revoke-key` / `cleanup-keys` — the model for reaching one box
 from many client hosts. Managed hosts use an isolated `known_hosts`
 (`accept-new` TOFU). `lockdown` (opt-in via `HARDEN=1` or the verb) sets a
 default-deny firewall (SSH-only; dev ports stay tunnel-reachable), disables

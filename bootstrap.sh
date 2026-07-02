@@ -361,8 +361,18 @@ main() {
                         if grep -Fqx "$LOCAL_SSH_KEY" <<< "$GITHUB_KEYS"; then
                             info "SSH key is already registered with GitHub"
                             GITHUB_SSH_READY=true
-                        elif run gh ssh-key add ~/.ssh/id_ed25519.pub --title "$(hostname)"; then
-                            GITHUB_SSH_READY=true
+                        else
+                            # Keep both GitHub's title and the public key's
+                            # embedded comment descriptive. Do not rewrite the
+                            # user's local .pub file.
+                            SSH_KEY_UPLOAD="$(mktemp)"
+                            awk -v host="$(hostname)" \
+                                '{ print $1 " " $2 " " host }' \
+                                ~/.ssh/id_ed25519.pub > "$SSH_KEY_UPLOAD"
+                            if run gh ssh-key add "$SSH_KEY_UPLOAD" --title "$(hostname)"; then
+                                GITHUB_SSH_READY=true
+                            fi
+                            rm -f "$SSH_KEY_UPLOAD"
                         fi
                     fi
                 fi

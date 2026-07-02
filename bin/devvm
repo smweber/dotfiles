@@ -44,9 +44,11 @@ Usage:
   devvm mosh NAME                    Connect via mosh
   devvm vnc NAME                     Tunnel (if needed) + open VNC
   devvm authorize-key NAME [KEY]     Add a client pubkey (path | 'ssh-...' |
-                                     --from-github USER | default: this host)
+                                     --from-github USER | default: prompt for GitHub)
   devvm keys NAME                    List authorized keys
-  devvm revoke-key NAME PATTERN      Remove authorized keys matching PATTERN
+  devvm revoke-key NAME PATTERN      Remove one key by unique fingerprint,
+                                     comment, or key-line substring
+  devvm cleanup-keys NAME            Remove duplicate authorized keys
   devvm lockdown NAME                Firewall + sshd hardening + auto-updates
 
 Registry: ~/.config/devvm/machines/<name>.conf (sourced bash). Keys:
@@ -711,7 +713,110 @@ resolve_pubkeys() {
     fi
 }
 
-# Append RESOLVED_KEYS to the machine's authorized_keys (deduplicated).
+# Give interactively-added keys useful labels. GitHub's public .keys endpoint
+# does not expose the SSH key title, so it cannot tell us which client a key
+# belongs to; the local hostname is the best available default.
+label_resolved_keys() {
+    [[ -r /dev/tty ]] || die "no terminal for key comments; pass an explicitly commented key"
+    local default comment line type blob
+    default="$(hostname -s 2>/dev/null || hostname)"
+    local -a labeled=()
+    for line in "${RESOLVED_KEYS[@]}"; do
+        read -r type blob _ <<< "$line"
+        [[ -n "$type" && -n "$blob" ]] || die "invalid public key: $line"
+        while true; do
+            read -r -p "Comment for ${type} key [$default]: " comment < /dev/tty
+            comment="${comment:-$default}"
+            if [[ "$comment" =~ ^[^[:space:]@]+@[^[:space:]@]+$ ]]; then
+                echo "devvm: use a hostname or other descriptive label, not just an email address" >&2
+                continue
+            fi
+            break
+        done
+        labeled+=("$type $blob $comment")
+    done
+    RESOLVED_KEYS=("${labeled[@]}")
+}
+
+# Rewrite authorized_keys without the machine's own public keys or duplicate
+# key material. The first duplicate keeps its position. If it has no comment
+# but a later copy does, retain the later comment on that first line.
+cleanup_authorized_keys() {
+    local name="$1" quiet="${2:-}"
+    m_run "$name" bash -lc '
+        f="$HOME/.ssh/authorized_keys"
+        [[ -f "$f" ]] || { [[ "$1" == quiet ]] || echo "devvm: no authorized_keys"; exit 0; }
+        own="$f.own.$$"
+        printf "# machine public keys\n" > "$own"
+        for pub in "$HOME"/.ssh/id_*.pub; do
+            [[ -f "$pub" ]] || continue
+            awk '"'"'{ print $1 " " $2 }'"'"' "$pub" >> "$own"
+        done
+        awk -v countfile="$f.count" -v ownfile="$own" '"'"'
+            BEGIN {
+                while ((getline own_line < ownfile) > 0) {
+                    split(own_line, own_fields, /[[:space:]]+/)
+                    if (own_fields[1] ~ /^(ssh-|ecdsa-|sk-)/)
+                        machine_key[own_fields[1] " " own_fields[2]] = 1
+                }
+                close(ownfile)
+            }
+            function parse(line, a, n, i, j) {
+                n = split(line, a, /[[:space:]]+/)
+                key_id = ""; key_prefix = ""; key_comment = ""
+                for (i = 1; i < n; i++) {
+                    if (a[i] ~ /^(ssh-|ecdsa-|sk-)/) {
+                        key_id = a[i] " " a[i + 1]
+                        for (j = 1; j <= i + 1; j++)
+                            key_prefix = key_prefix (j == 1 ? "" : " ") a[j]
+                        for (j = i + 2; j <= n; j++)
+                            key_comment = key_comment (j == i + 2 ? "" : " ") a[j]
+                        return
+                    }
+                }
+            }
+            {
+                lines[NR] = $0
+                parse($0)
+                if (key_id == "") next
+                if (key_id in machine_key) {
+                    machine_key_line[NR] = 1
+                    own_removed++
+                    next
+                }
+                if (!(key_id in first)) {
+                    first[key_id] = NR
+                    comments[key_id] = key_comment
+                    prefixes[key_id] = key_prefix
+                } else {
+                    duplicate[NR] = 1
+                    removed++
+                    if (comments[key_id] == "" && key_comment != "") {
+                        lines[first[key_id]] = prefixes[key_id] " " key_comment
+                        comments[key_id] = key_comment
+                    }
+                }
+            }
+            END {
+                for (i = 1; i <= NR; i++)
+                    if (!(i in duplicate) && !(i in machine_key_line)) print lines[i]
+                print removed + 0, own_removed + 0 > countfile
+            }
+        '"'"' "$f" > "$f.tmp"
+        count=$?
+        read -r removed own_removed < "$f.count"
+        rm -f "$f.count" "$own"
+        mv "$f.tmp" "$f"
+        chmod 600 "$f"
+        if [[ "$1" != quiet ]]; then
+            echo "devvm: removed $removed duplicate and $own_removed machine-owned key line(s)"
+        fi
+        exit "$count"
+    ' _ "$quiet"
+}
+
+# Append RESOLVED_KEYS to the machine's authorized_keys, then deduplicate by
+# key material rather than by the full line (comments are not key identity).
 push_authorized_keys() {
     local name="$1"
     # The key travels as an argv element ($1), not spliced into the script:
@@ -719,21 +824,47 @@ push_authorized_keys() {
     local key
     for key in "${RESOLVED_KEYS[@]}"; do
         m_run "$name" bash -lc '
+            set -e
             install -d -m 700 "$HOME/.ssh" &&
             touch "$HOME/.ssh/authorized_keys" &&
-            chmod 600 "$HOME/.ssh/authorized_keys" &&
-            grep -qxF "$1" "$HOME/.ssh/authorized_keys" ||
-                printf "%s\n" "$1" >> "$HOME/.ssh/authorized_keys"
+            chmod 600 "$HOME/.ssh/authorized_keys"
+            incoming=$(awk '"'"'
+                {
+                    for (i = 1; i < NF; i++)
+                        if ($i ~ /^(ssh-|ecdsa-|sk-)/) {
+                            print $i " " $(i + 1)
+                            exit
+                        }
+                }
+            '"'"' <<< "$1")
+            for pub in "$HOME"/.ssh/id_*.pub; do
+                [[ -f "$pub" ]] || continue
+                own=$(awk '"'"'{ print $1 " " $2 }'"'"' "$pub")
+                if [[ "$incoming" == "$own" ]]; then
+                    echo "devvm: skipping the machine'"'"'s own key" >&2
+                    exit 0
+                fi
+            done
+            printf "%s\n" "$1" >> "$HOME/.ssh/authorized_keys"
         ' _ "$key"
     done
-    echo "devvm: authorized ${#RESOLVED_KEYS[@]} key(s) on '$name'"
+    cleanup_authorized_keys "$name" quiet
+    echo "devvm: processed ${#RESOLVED_KEYS[@]} key(s) for '$name'"
 }
 
 authorize_key() {
     local name="$1"; shift
     load_machine "$name"
     require_ssh authorize-key
+    if (($# == 0)); then
+        [[ -r /dev/tty ]] || die "no terminal; use --from-github USER"
+        local github_user
+        read -r -p "GitHub user ID: " github_user < /dev/tty
+        [[ -n "$github_user" ]] || die "GitHub user ID is required"
+        set -- --from-github "$github_user"
+    fi
     resolve_pubkeys "$@" || die "no keys to authorize"
+    label_resolved_keys
     push_authorized_keys "$name"
 }
 
@@ -770,16 +901,78 @@ revoke_key() {
     local name="$1" pattern="$2"
     load_machine "$name"
     require_ssh revoke-key
+    local pub key_id
+    local -a protected_keys=()
+    for pub in "$HOME"/.ssh/id_*.pub; do
+        [[ -f "$pub" ]] || continue
+        key_id="$(awk '{ print $1 " " $2; exit }' "$pub")"
+        [[ -n "$key_id" ]] && protected_keys+=("$key_id")
+    done
+    if [[ -n "${IDENTITY:-}" ]]; then
+        pub="${IDENTITY/#\~/$HOME}.pub"
+        if [[ -f "$pub" ]]; then
+            key_id="$(awk '{ print $1 " " $2; exit }' "$pub")"
+            [[ -n "$key_id" ]] && protected_keys+=("$key_id")
+        fi
+    fi
     m_run "$name" bash -lc '
         f="$HOME/.ssh/authorized_keys"
         [[ -f "$f" ]] || { echo "devvm: no authorized_keys"; exit 0; }
-        before=$(wc -l <"$f")
-        grep -vF -- "$1" "$f" > "$f.tmp" || true
+        pattern="$1"
+        shift
+        protected=("$@")
+        matches=()
+        summaries=()
+        matched_ids=()
+        line_number=0
+        while IFS= read -r line; do
+            ((line_number += 1))
+            [[ -z "$line" || "$line" == \#* ]] && continue
+            summary=$(ssh-keygen -l -f /dev/stdin <<< "$line" 2>/dev/null || printf "%s" "$line")
+            if [[ "$line" == *"$pattern"* || "$summary" == *"$pattern"* ]]; then
+                matches+=("$line_number")
+                summaries+=("$summary")
+                matched_ids+=("$(awk '"'"'
+                    {
+                        for (i = 1; i < NF; i++)
+                            if ($i ~ /^(ssh-|ecdsa-|sk-)/) {
+                                print $i " " $(i + 1)
+                                exit
+                            }
+                    }
+                '"'"' <<< "$line")")
+            fi
+        done < "$f"
+
+        if ((${#matches[@]} == 0)); then
+            echo "devvm: no key matches: $pattern" >&2
+            exit 1
+        fi
+        if ((${#matches[@]} > 1)); then
+            echo "devvm: pattern is ambiguous ($pattern); matching keys:" >&2
+            printf "  %s\n" "${summaries[@]}" >&2
+            exit 1
+        fi
+
+        for protected_id in "${protected[@]}"; do
+            if [[ "${matched_ids[0]}" == "$protected_id" ]]; then
+                echo "devvm: refusing to revoke a key belonging to this host: ${summaries[0]}" >&2
+                exit 1
+            fi
+        done
+
+        awk -v remove="${matches[0]}" '"'"'NR != remove'"'"' "$f" > "$f.tmp"
         mv "$f.tmp" "$f"
         chmod 600 "$f"
-        after=$(wc -l <"$f")
-        echo "devvm: removed $((before - after)) key line(s)"
-    ' _ "$pattern"
+        echo "devvm: removed ${summaries[0]}"
+    ' _ "$pattern" "${protected_keys[@]}"
+}
+
+cleanup_keys() {
+    local name="$1"
+    load_machine "$name"
+    require_ssh cleanup-keys
+    cleanup_authorized_keys "$name"
 }
 
 # --- ssh hardening / lockdown ----------------------------------------------
@@ -1073,6 +1266,7 @@ complete_command() {
             'authorize-key\tAdd an authorized client key\n' \
             'keys\tList authorized keys\n' \
             'revoke-key\tRemove authorized keys\n' \
+            'cleanup-keys\tRemove duplicate authorized keys\n' \
             'lockdown\tFirewall + sshd hardening\n' \
             'help\tShow help\n'
         return 0
@@ -1090,7 +1284,7 @@ complete_command() {
             fi
             ;;
         bootstrap|shell|exec|repos|port|start|stop|status|delete|\
-        ssh|mosh|vnc|authorize-key|keys|revoke-key|lockdown)
+        ssh|mosh|vnc|authorize-key|keys|revoke-key|cleanup-keys|lockdown)
             (( n == 1 )) && complete_machines
             ;;
         create)
@@ -1217,6 +1411,10 @@ main() {
         revoke-key)
             [[ $# -eq 3 ]] || die "usage: devvm revoke-key NAME PATTERN"
             revoke_key "$2" "$3"
+            ;;
+        cleanup-keys)
+            [[ $# -eq 2 ]] || die "usage: devvm cleanup-keys NAME"
+            cleanup_keys "$2"
             ;;
         lockdown)
             [[ $# -eq 2 ]] || die "usage: devvm lockdown NAME"
