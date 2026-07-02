@@ -43,3 +43,31 @@ stow_packages() {
     fi
     echo "$pkgs"
 }
+
+# Append devvm completion to an existing zsh config without taking ownership
+# of the whole file.
+install_devvm_zsh_completion() {
+    local zshrc="$HOME/.zshrc"
+    local marker="# >>> devvm zsh completion >>>"
+
+    [[ -e "$zshrc" ]] || touch "$zshrc"
+    grep -Fq "$marker" "$zshrc" && return 0
+
+    cat >>"$zshrc" <<'ZSH_COMPLETION'
+
+# >>> devvm zsh completion >>>
+if (( ! $+functions[compdef] )); then
+    autoload -Uz compinit
+    compinit
+fi
+
+_devvm() {
+    local -a candidates
+    candidates=("${(@f)$(command devvm __complete-zsh "$CURRENT" "${words[@]}")}")
+    _describe 'devvm value' candidates
+}
+
+compdef _devvm devvm
+# <<< devvm zsh completion <<<
+ZSH_COMPLETION
+}

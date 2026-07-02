@@ -398,6 +398,7 @@ main() {
     # Stow dotfiles
     # -------------------------------------------------------------------------
     step "Stow dotfiles"
+    install_devvm_zsh_completion
     if has stow; then
         ALL_STOW="$(stow_packages "$OS" "$HAS_GUI")"
         info "This symlinks config files to your home directory"

@@ -72,6 +72,9 @@ fi
 
 info "Packages to stow: $PACKAGES"
 
+# devvm augments the machine-owned zsh config; it does not Stow ~/.zshrc.
+install_devvm_zsh_completion
+
 # Find and show broken symlinks pointing to dotfiles
 info "Checking for broken symlinks..."
 BROKEN=$(find ~ ~/.config -maxdepth 3 -type l -lname '*/.dotfiles/*' ! -exec test -e {} \; -print 2>/dev/null || true)

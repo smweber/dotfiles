@@ -167,6 +167,10 @@ save_machine_conf() {
         [[ -n "$HARDEN" ]]                && echo "HARDEN=$HARDEN"
         [[ -n "$FAIL2BAN" ]]              && echo "FAIL2BAN=$FAIL2BAN"
     } >"$conf"
+    # Optional fields normally leave the final `[[ -n ... ]]` false. Do not
+    # leak that status to callers running with `set -e` after a successful
+    # config write.
+    return 0
 }
 
 is_exposed_backend() {
@@ -181,21 +185,24 @@ smol_run() {
     need_smolvm
     local name="$1"; shift
     smolvm machine exec --name "$name" -- \
-        sudo -iu "$VM_USER" env SMOLVM_GUEST=1 "$@"
+        sudo -u "$VM_USER" -H env SMOLVM_GUEST=1 \
+        bash -lc 'exec "$@"' _ "$@"
 }
 
 smol_run_it() {
     need_smolvm
     local name="$1"; shift
     smolvm machine exec -it --name "$name" -- \
-        sudo -iu "$VM_USER" env SMOLVM_GUEST=1 "$@"
+        sudo -u "$VM_USER" -H env SMOLVM_GUEST=1 \
+        bash -lc 'exec "$@"' _ "$@"
 }
 
 smol_run_stream() {
     need_smolvm
     local name="$1"; shift
     smolvm machine exec --stream --name "$name" -- \
-        sudo -iu "$VM_USER" env SMOLVM_GUEST=1 "$@"
+        sudo -u "$VM_USER" -H env SMOLVM_GUEST=1 \
+        bash -lc 'exec "$@"' _ "$@"
 }
 
 smol_cp() {
@@ -471,7 +478,7 @@ make_dotfiles_archive() {
 smol_prepare_guest() {
     local name="$1"
     echo "Installing the minimal guest prerequisites..."
-    smolvm machine exec --name "$name" -- bash -lc "
+    smolvm machine exec --stream --name "$name" -- bash -lc "
         apt-get update &&
         DEBIAN_FRONTEND=noninteractive apt-get install -y \
             build-essential ca-certificates curl git sudo &&
@@ -505,22 +512,32 @@ ssh_prepare_guest() {
 push_dotfiles() {
     local name="$1"
     echo "Copying the local dotfiles checkout into '$name'..."
-    local archive
+    local archive guest_archive="/tmp/devvm-dotfiles.tar.gz"
     archive="$(make_dotfiles_archive)"
     # shellcheck disable=SC2064
     trap "rm -f '$archive'" RETURN
 
-    m_cp "$name" "$archive" "/tmp/devvm-dotfiles.tar.gz"
+    if [[ "$BACKEND" == "smol" ]]; then
+        # smolvm mounts a runtime tmpfs on /tmp for exec, while `machine cp`
+        # writes to the persistent rootfs underneath it. Transfer through the
+        # persistent user home so the following exec can see the archive.
+        guest_archive="/home/$VM_USER/.devvm-dotfiles.tar.gz"
+    fi
+    m_cp "$name" "$archive" "$guest_archive"
+    if [[ "$BACKEND" == "smol" ]]; then
+        smolvm machine exec --name "$name" -- \
+            chown "$VM_USER:$VM_USER" "$guest_archive"
+    fi
     m_run "$name" bash -lc '
+        archive="$1"
         rm -rf "$HOME/.dotfiles" &&
         mkdir -p "$HOME/.dotfiles" &&
-        tar -xzf /tmp/devvm-dotfiles.tar.gz -C "$HOME/.dotfiles" &&
+        tar -xzf "$archive" -C "$HOME/.dotfiles" &&
         if [[ -f "$HOME/.profile" && ! -L "$HOME/.profile" ]]; then
             mv "$HOME/.profile" "$HOME/.profile.before-devvm"
         fi
-        rm -f /tmp/devvm-dotfiles.tar.gz 2>/dev/null ||
-            sudo rm -f /tmp/devvm-dotfiles.tar.gz
-    '
+        rm -f "$archive" 2>/dev/null || sudo rm -f "$archive"
+    ' _ "$guest_archive"
 }
 
 bootstrap_machine() {
@@ -531,7 +548,8 @@ bootstrap_machine() {
 
     "${BACKEND}_prepare_guest" "$name"
     push_dotfiles "$name"
-    m_run_stream "$name" "\$HOME/.dotfiles/bootstrap.sh" --profile agent-vm --yes
+    m_run_stream "$name" bash -lc \
+        'exec "$HOME/.dotfiles/bootstrap.sh" "$@"' _ --profile agent-vm --yes
 
     if is_exposed_backend; then
         seed_authorized_keys "$name"
@@ -589,6 +607,7 @@ host_open_url() {
 ensure_url_bridge() {
     local name="$1"
     local helper
+    local guest_helper="/tmp/devvm-open-url"
     helper="$(mktemp)"
     cat >"$helper" <<'SH'
 #!/usr/bin/env bash
@@ -597,14 +616,21 @@ mkdir -p "$HOME/.devvm"
 printf '%s\n' "$1" >> "$HOME/.devvm/urls"
 echo "devvm: sent to host browser -> $1" >&2
 SH
-    m_cp "$name" "$helper" "/tmp/devvm-open-url"
+    if [[ "$BACKEND" == "smol" ]]; then
+        guest_helper="/home/$VM_USER/.devvm-open-url"
+    fi
+    m_cp "$name" "$helper" "$guest_helper"
     rm -f "$helper"
+    if [[ "$BACKEND" == "smol" ]]; then
+        smolvm machine exec --name "$name" -- \
+            chown "$VM_USER:$VM_USER" "$guest_helper"
+    fi
     m_run "$name" bash -lc '
-        sudo install -m 0755 /tmp/devvm-open-url /usr/local/bin/devvm-open-url &&
-        rm -f /tmp/devvm-open-url &&
+        sudo install -m 0755 "$1" /usr/local/bin/devvm-open-url &&
+        rm -f "$1" &&
         install -d -m 700 "$HOME/.devvm" &&
         : > "$HOME/.devvm/urls"
-    '
+    ' _ "$guest_helper"
 }
 
 # Tail the machine outbox and open each URL on the host. Runs until stopped.
