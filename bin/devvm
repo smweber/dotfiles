@@ -1,37 +1,61 @@
 #!/usr/bin/env bash
 #
-# Small wrapper around smolvm for persistent, isolated development machines.
-# Run `smolvm --help` to see the underlying commands.
+# devvm — one frontend for persistent dev boxes, whatever the transport.
+#
+# Backends:
+#   smol  local, isolated smolvm microVMs (run `smolvm --help`)
+#   ssh   an existing SSH host (subsumes the old devtunnel workflow)
+#   ...   a `hetzner` (cloud) backend slots in later — see HETZNER note below.
+#
+# Per-machine config lives in ~/.config/devvm/machines/<name>.conf (sourced
+# bash; trusted, user-owned). See usage() for the schema.
 
 set -euo pipefail
+
+# --- globals ---------------------------------------------------------------
 
 IMAGE="ubuntu:24.04"
 CPUS=4
 STORAGE_GIB=50
 VM_USER="dev"
 DOTFILES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Guest file the in-VM browser shim appends login URLs to; the host watcher
-# (see start_url_watcher) tails it and opens each URL in the host browser.
-URL_OUTBOX="/home/$VM_USER/.devvm/urls"
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/devvm"
+MACHINES_DIR="$CONFIG_DIR/machines"
+KNOWN_HOSTS="$CONFIG_DIR/known_hosts"
 
 usage() {
     cat <<'EOF'
 Usage:
-  devvm create NAME [--memory MiB]
-                           Create and bootstrap a persistent agent VM
-  devvm bootstrap NAME     Resume or rerun guest provisioning
-  devvm shell NAME         Attach to the dev user's tmux session
-  devvm exec NAME CMD...   Run a command as the dev user
-  devvm auth NAME [TOOL]   Log in to github, codex, claude (or all if omitted).
-                           Login URLs are opened in the host browser.
-  devvm repos NAME         Clone this VM's configured repositories
-  devvm port NAME H:G      Add host:guest port mapping (VM is restarted)
-  devvm start NAME
-  devvm stop NAME
-  devvm status [NAME]
-  devvm delete NAME
+  devvm create NAME [--memory MiB]   Create + bootstrap a local smol VM
+  devvm bootstrap NAME               Resume/rerun guest provisioning
+  devvm shell NAME                   Attach to the dev tmux session
+  devvm exec NAME CMD...             Run a command as the dev user
+  devvm auth NAME [TOOL]             Log in to github/codex/claude (all if omitted);
+                                     login URLs open in the host browser
+  devvm repos NAME                   Clone this machine's configured repos
+  devvm port NAME H:G                Add a port mapping/forward
+  devvm start|stop|delete NAME       Machine power / removal (backend-aware)
+  devvm status [NAME]                Machine status; no NAME lists all machines
 
-Edit configure_machine() below to hardcode repositories and ports.
+  Remote (ssh) machines only:
+  devvm ssh NAME                     Open an interactive shell
+  devvm tunnel NAME [up|down|status] autossh port forwards (default: up)
+  devvm mosh NAME                    Connect via mosh
+  devvm vnc NAME                     Tunnel (if needed) + open VNC
+  devvm authorize-key NAME [KEY]     Add a client pubkey (path | 'ssh-...' |
+                                     --from-github USER | default: this host)
+  devvm keys NAME                    List authorized keys
+  devvm revoke-key NAME PATTERN      Remove authorized keys matching PATTERN
+  devvm lockdown NAME                Firewall + sshd hardening + auto-updates
+
+Registry: ~/.config/devvm/machines/<name>.conf (sourced bash). Keys:
+  BACKEND=smol|ssh          UNMANAGED=1 (ssh: lifecycle/harden are no-ops)
+  SSH_HOST=host  SSH_PORT=22  IDENTITY=~/.ssh/id_ed25519
+  MEMORY=4096 (smol)        REPOS="owner/a owner/b"
+  PORTS="3000:3000 5901"    VNC_PORT=5901  MOSH_SERVER=/path/mosh-server
+  AUTHORIZED_KEYS_GITHUB="user ..."   AUTHORIZED_KEYS="~/.ssh/a.pub ..."
+  HARDEN=1  FAIL2BAN=1
 EOF
 }
 
@@ -40,96 +64,345 @@ die() {
     exit 1
 }
 
+confirm() {
+    # confirm PROMPT — returns 0 if the user types y/yes.
+    local reply
+    [[ -r /dev/tty ]] || die "no terminal for confirmation; aborting"
+    read -r -p "$1 [y/N] " reply < /dev/tty
+    [[ "$reply" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
+
 need_smolvm() {
     command -v smolvm >/dev/null 2>&1 ||
         die "smolvm is not installed; run bootstrap.sh on the host"
 }
 
-suggested_memory_mib() {
-    local total_mib
-
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        total_mib=$(( $(sysctl -n hw.memsize) / 1024 / 1024 ))
-    else
-        total_mib="$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)"
-    fi
-
-    local half_mib=$(( total_mib / 2 ))
-    if (( half_mib > 2048 )); then
-        echo 2048
-    elif (( half_mib < 1024 )); then
-        echo 1024
-    else
-        echo "$half_mib"
-    fi
+need_cmd() {
+    command -v "$1" >/dev/null 2>&1 || die "$1 is not installed on this host"
 }
 
-choose_memory_mib() {
-    local requested="${1:-}"
-    local suggested
-    suggested="$(suggested_memory_mib)"
+# --- registry --------------------------------------------------------------
 
-    if [[ -z "$requested" ]]; then
-        if [[ ! -r /dev/tty ]]; then
-            die "no terminal available; pass --memory MiB"
-        fi
-        read -r -p "VM memory in MiB [$suggested]: " requested < /dev/tty
-        requested="${requested:-$suggested}"
-    fi
-
-    [[ "$requested" =~ ^[0-9]+$ ]] ||
-        die "memory must be an integer number of MiB"
-    (( requested >= 512 )) ||
-        die "memory must be at least 512 MiB"
-
-    echo "$requested"
+registry_dir() {
+    mkdir -p "$MACHINES_DIR"
 }
 
-# This is the only per-machine configuration. Repository values use the
-# OWNER/REPO form accepted by `gh repo clone`. Port values are HOST:GUEST.
-configure_machine() {
-    REPOS=()
-    PORTS=()
-
-    case "$1" in
-        # Example:
-        # client-a)
-        #     REPOS=("client/repo-one" "client/repo-two")
-        #     PORTS=("3000:3000" "5173:5173")
-        #     ;;
-        *)
-            ;;
-    esac
+machine_conf() {
+    echo "$MACHINES_DIR/$1.conf"
 }
 
-machine_exists() {
-    smolvm machine status --name "$1" >/dev/null 2>&1
-}
-
-as_dev() {
+# Load a machine's config into globals. Unregistered names that smolvm knows
+# about are treated as smol machines (keeps pre-registry VMs working).
+load_machine() {
     local name="$1"
-    shift
+    BACKEND="" UNMANAGED="" SSH_HOST="" SSH_PORT="22" IDENTITY=""
+    MEMORY="" REPOS="" PORTS="" VNC_PORT="5901" MOSH_SERVER=""
+    AUTHORIZED_KEYS="" AUTHORIZED_KEYS_GITHUB="" HARDEN="" FAIL2BAN=""
+    MANAGED_SSH="" SSH_FWD_1455=""
+    MACHINE_NAME="$name"
+
+    local conf
+    conf="$(machine_conf "$name")"
+    if [[ -f "$conf" ]]; then
+        # shellcheck disable=SC1090
+        source "$conf"
+    elif command -v smolvm >/dev/null 2>&1 &&
+        smolvm machine status --name "$name" >/dev/null 2>&1; then
+        BACKEND="smol"
+    else
+        die "unknown machine '$name' (no $conf); run 'devvm status'"
+    fi
+
+    [[ -n "$BACKEND" ]] || die "machine '$name' has no BACKEND set in $conf"
+    case "$BACKEND" in
+        smol|ssh) ;;
+        *) die "machine '$name' has unsupported BACKEND='$BACKEND'" ;;
+    esac
+    [[ "$BACKEND" == "ssh" && "$UNMANAGED" != "1" ]] && MANAGED_SSH="1"
+    if [[ "$BACKEND" == "ssh" && -z "$SSH_HOST" ]]; then
+        die "ssh machine '$name' needs SSH_HOST in $conf"
+    fi
+    return 0
+}
+
+list_machines() {
+    [[ -d "$MACHINES_DIR" ]] || return 0
+    local f
+    for f in "$MACHINES_DIR"/*.conf; do
+        [[ -e "$f" ]] || continue
+        basename "$f" .conf
+    done
+}
+
+# Persist the currently loaded globals back to the machine's conf. Canonical
+# form: tool-managed but still hand-editable.
+save_machine_conf() {
+    local name="$1"
+    registry_dir
+    local conf
+    conf="$(machine_conf "$name")"
+    {
+        echo "# devvm machine config for '$name' (tool-managed; edit freely)"
+        echo "BACKEND=$BACKEND"
+        [[ -n "$UNMANAGED" ]]              && echo "UNMANAGED=$UNMANAGED"
+        [[ -n "$SSH_HOST" ]]              && echo "SSH_HOST=$SSH_HOST"
+        [[ "${SSH_PORT:-22}" != "22" ]]   && echo "SSH_PORT=$SSH_PORT"
+        [[ -n "$IDENTITY" ]]              && echo "IDENTITY=$IDENTITY"
+        [[ -n "$MEMORY" ]]                && echo "MEMORY=$MEMORY"
+        [[ -n "$REPOS" ]]                 && echo "REPOS=\"$REPOS\""
+        [[ -n "$PORTS" ]]                 && echo "PORTS=\"$PORTS\""
+        [[ "${VNC_PORT:-5901}" != "5901" ]] && echo "VNC_PORT=$VNC_PORT"
+        [[ -n "$MOSH_SERVER" ]]           && echo "MOSH_SERVER=$MOSH_SERVER"
+        [[ -n "$AUTHORIZED_KEYS_GITHUB" ]] && echo "AUTHORIZED_KEYS_GITHUB=\"$AUTHORIZED_KEYS_GITHUB\""
+        [[ -n "$AUTHORIZED_KEYS" ]]       && echo "AUTHORIZED_KEYS=\"$AUTHORIZED_KEYS\""
+        [[ -n "$HARDEN" ]]                && echo "HARDEN=$HARDEN"
+        [[ -n "$FAIL2BAN" ]]              && echo "FAIL2BAN=$FAIL2BAN"
+    } >"$conf"
+}
+
+is_exposed_backend() {
+    [[ "$BACKEND" == "ssh" ]]   # (or a future cloud backend)
+}
+
+# --- backend: smol ---------------------------------------------------------
+
+smol_exists() { need_smolvm; smolvm machine status --name "$1" >/dev/null 2>&1; }
+
+smol_run() {
+    need_smolvm
+    local name="$1"; shift
     smolvm machine exec --name "$name" -- \
         sudo -iu "$VM_USER" env SMOLVM_GUEST=1 "$@"
 }
 
-as_dev_interactive() {
-    local name="$1"
-    shift
+smol_run_it() {
+    need_smolvm
+    local name="$1"; shift
     smolvm machine exec -it --name "$name" -- \
         sudo -iu "$VM_USER" env SMOLVM_GUEST=1 "$@"
 }
 
-as_dev_stream() {
-    local name="$1"
-    shift
+smol_run_stream() {
+    need_smolvm
+    local name="$1"; shift
     smolvm machine exec --stream --name "$name" -- \
         sudo -iu "$VM_USER" env SMOLVM_GUEST=1 "$@"
 }
 
-bootstrap_machine() {
-    local name="$1"
+smol_cp() {
+    need_smolvm
+    smolvm machine cp "$2" "$1:$3"
+}
 
+smol_start() { need_smolvm; smolvm machine start --name "$1"; }
+smol_stop()  { need_smolvm; smolvm machine stop  --name "$1"; }
+
+smol_delete() {
+    need_smolvm
+    smolvm machine delete --name "$1"
+    rm -f "$(machine_conf "$1")"
+}
+
+smol_status() { need_smolvm; smolvm machine status --name "$1"; }
+
+# --- backend: ssh ----------------------------------------------------------
+
+# Build the shared ssh option array (SSH_BASE) from the loaded machine globals.
+build_ssh_base() {
+    SSH_BASE=(ssh)
+    [[ "${SSH_PORT:-22}" != "22" ]] && SSH_BASE+=(-p "$SSH_PORT")
+    [[ -n "${IDENTITY:-}" ]]        && SSH_BASE+=(-i "${IDENTITY/#\~/$HOME}")
+    # Reuse one connection for concurrent sessions (e.g. login + URL watcher).
+    mkdir -p "$CONFIG_DIR"
+    SSH_BASE+=(-o ControlMaster=auto
+               -o "ControlPath=$CONFIG_DIR/cm-%C"
+               -o ControlPersist=60)
+    # Managed (non-unmanaged) hosts get an isolated, TOFU-pinned known_hosts.
+    if [[ "${MANAGED_SSH:-}" == "1" ]]; then
+        SSH_BASE+=(-o "UserKnownHostsFile=$KNOWN_HOSTS"
+                   -o StrictHostKeyChecking=accept-new)
+    fi
+    [[ "${SSH_FWD_1455:-}" == "1" ]] && SSH_BASE+=(-L 1455:localhost:1455)
+    return 0
+}
+
+# Single-quote a string for any POSIX shell (and fish).
+sq() { local s=${1//\'/\'\\\'\'}; printf "'%s'" "$s"; }
+
+# Build a remote command that survives the login shell (bash, fish, ...): the
+# argv is bash-quoted into one line, handed to a remote `bash -lc` inside single
+# quotes. ssh reconstructs the remote command via $SHELL, so this double layer
+# keeps our command intact regardless of the user's default shell.
+ssh_wrap() {
+    local line
+    printf -v line '%q ' "$@"
+    printf 'bash -lc %s' "$(sq "$line")"
+}
+
+ssh_run() {
+    need_cmd ssh
+    local name="$1"; shift
+    build_ssh_base
+    "${SSH_BASE[@]}" "$SSH_HOST" "$(ssh_wrap "$@")"
+}
+
+ssh_run_it() {
+    need_cmd ssh
+    local name="$1"; shift
+    build_ssh_base
+    "${SSH_BASE[@]}" -t "$SSH_HOST" "$(ssh_wrap "$@")"
+}
+
+# ssh streams by default, no special mode needed.
+ssh_run_stream() { ssh_run "$@"; }
+
+ssh_cp() {
+    need_cmd scp
+    local name="$1" src="$2" dest="$3"
+    local -a o=(scp)
+    [[ "${SSH_PORT:-22}" != "22" ]] && o+=(-P "$SSH_PORT")
+    [[ -n "${IDENTITY:-}" ]]        && o+=(-i "${IDENTITY/#\~/$HOME}")
+    "${o[@]}" "$src" "$SSH_HOST:$dest"
+}
+
+ssh_unmanaged_noop() {
+    echo "devvm: '$MACHINE_NAME' is an unmanaged ssh host; '$1' is a no-op." >&2
+}
+
+ssh_start()  { ssh_unmanaged_noop start; }
+ssh_stop()   { ssh_unmanaged_noop stop; }
+ssh_delete() {
+    if [[ "${UNMANAGED:-}" == "1" ]]; then
+        confirm "Remove registry entry for unmanaged host '$1' (leaves the host untouched)?" ||
+            die "aborted"
+    fi
+    rm -f "$(machine_conf "$1")"
+    echo "devvm: removed registry entry for '$1'"
+}
+
+ssh_status() {
+    echo "Machine '$1' (ssh -> $SSH_HOST):"
+    if ssh_tunnel_running; then
+        echo "  tunnel: running (PID $(pgrep -f "$(autossh_pattern)" | head -1))"
+        echo "  ports:"
+        check_ports
+    else
+        echo "  tunnel: not running"
+    fi
+}
+
+# --- ssh tunnel / mosh / vnc (from devtunnel) ------------------------------
+
+autossh_pattern() { echo "autossh.*${SSH_HOST}\\b"; }
+
+ssh_tunnel_running() { pgrep -f "$(autossh_pattern)" >/dev/null 2>&1; }
+
+ssh_forwards() {
+    FWD=()
+    local p h g
+    for p in $PORTS; do
+        if [[ "$p" == *:* ]]; then h="${p%%:*}"; g="${p##*:}"; else h="$p"; g="$p"; fi
+        FWD+=(-L "${h}:localhost:${g}")
+    done
+}
+
+ssh_tunnel_up() {
+    need_cmd autossh
+    if ssh_tunnel_running; then
+        echo "devvm: tunnel already running (PID $(pgrep -f "$(autossh_pattern)" | head -1))"
+        return 0
+    fi
+    ssh_forwards
+    local -a args=(-M 0 -N -f
+        -o ServerAliveInterval=30 -o ServerAliveCountMax=3
+        -o ExitOnForwardFailure=yes)
+    [[ "${SSH_PORT:-22}" != "22" ]] && args+=(-p "$SSH_PORT")
+    [[ -n "${IDENTITY:-}" ]]        && args+=(-i "${IDENTITY/#\~/$HOME}")
+    if ((${#FWD[@]})); then args+=("${FWD[@]}"); fi
+    args+=("$SSH_HOST")
+    autossh "${args[@]}"
+    if ssh_tunnel_running; then
+        echo "devvm: tunnel started; forwarding: ${PORTS:-<none>}"
+    else
+        die "failed to start tunnel"
+    fi
+}
+
+ssh_tunnel_down() {
+    if ! ssh_tunnel_running; then
+        echo "devvm: no tunnel running"
+        return 0
+    fi
+    pkill -f "$(autossh_pattern)" 2>/dev/null || true
+    pkill -f "ssh.*${SSH_HOST}\\b" 2>/dev/null || true
+    sleep 0.5
+    ssh_tunnel_running && die "failed to stop tunnel"
+    echo "devvm: tunnel stopped"
+}
+
+check_ports() {
+    local p h
+    for p in $PORTS; do
+        if [[ "$p" == *:* ]]; then h="${p%%:*}"; else h="$p"; fi
+        local listening
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            listening=$(lsof -iTCP:"$h" -sTCP:LISTEN -P -n 2>/dev/null | grep -c LISTEN)
+        else
+            listening=$(ss -tlnp 2>/dev/null | grep -c ":${h} ")
+        fi
+        if [[ "$listening" -gt 0 ]]; then
+            printf '    %-6s listening\n' "$h"
+        else
+            printf '    %-6s not listening\n' "$h"
+        fi
+    done
+}
+
+ssh_mosh() {
+    need_cmd mosh
+    if [[ -n "${MOSH_SERVER:-}" ]]; then
+        mosh --server="$MOSH_SERVER" "$SSH_HOST"
+    else
+        mosh "$SSH_HOST"
+    fi
+}
+
+ssh_vnc() {
+    local port="${VNC_PORT:-5901}"
+    ssh_tunnel_up
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        open "vnc://localhost:${port}"
+    elif command -v gvncviewer >/dev/null 2>&1; then
+        gvncviewer "localhost:$((port - 5900))"
+    else
+        die "gvncviewer not found; install it or connect to localhost:${port}"
+    fi
+}
+
+# --- backend dispatch ------------------------------------------------------
+# These require load_machine to have been called (BACKEND is set).
+
+m_run()        { "${BACKEND}_run" "$@"; }
+m_run_it()     { "${BACKEND}_run_it" "$@"; }
+m_run_stream() { "${BACKEND}_run_stream" "$@"; }
+m_cp()         { "${BACKEND}_cp" "$@"; }
+
+require_ssh() {
+    [[ "$BACKEND" == "ssh" ]] || die "'$1' only applies to ssh machines ('$MACHINE_NAME' is $BACKEND)"
+}
+
+# --- provisioning ----------------------------------------------------------
+
+make_dotfiles_archive() {
+    # Echoes the path to a fresh archive; caller removes it.
+    local archive
+    archive="$(mktemp /tmp/devvm-dotfiles.XXXXXX.tar.gz)"
+    tar --exclude='./.*' -czf "$archive" -C "$DOTFILES_DIR" .
+    echo "$archive"
+}
+
+smol_prepare_guest() {
+    local name="$1"
     echo "Installing the minimal guest prerequisites..."
     smolvm machine exec --name "$name" -- bash -lc "
         apt-get update &&
@@ -148,113 +421,82 @@ bootstrap_machine() {
                 printf '127.0.1.1 %s\n' \"\$guest_hostname\" >>/etc/hosts
         }
     "
-
-    echo "Copying the local dotfiles checkout into the VM..."
-    local archive
-    archive="$(mktemp /tmp/devvm-dotfiles.XXXXXX.tar.gz)"
-    # Expand the unique temporary path now so cleanup still works on failure.
-    # shellcheck disable=SC2064
-    trap "rm -f '$archive'" EXIT
-
-    tar \
-        --exclude='./.*' \
-        -czf "$archive" \
-        -C "$DOTFILES_DIR" .
-
-    smolvm machine cp \
-        "$archive" \
-        "$name:/workspace/devvm-dotfiles.tar.gz"
-    smolvm machine exec --name "$name" -- bash -lc "
-        rm -rf '/home/$VM_USER/.dotfiles' &&
-        mkdir -p '/home/$VM_USER/.dotfiles' &&
-        tar -xzf /workspace/devvm-dotfiles.tar.gz -C '/home/$VM_USER/.dotfiles' &&
-        chown -R '$VM_USER:$VM_USER' '/home/$VM_USER/.dotfiles' &&
-        if [[ -f '/home/$VM_USER/.profile' ]] &&
-            [[ ! -L '/home/$VM_USER/.profile' ]]; then
-            mv '/home/$VM_USER/.profile' '/home/$VM_USER/.profile.before-devvm'
-            chown '$VM_USER:$VM_USER' '/home/$VM_USER/.profile.before-devvm'
-        fi &&
-        rm -f /workspace/devvm-dotfiles.tar.gz
-    "
-    rm -f "$archive"
-    trap - EXIT
-
-    as_dev_stream "$name" "/home/$VM_USER/.dotfiles/bootstrap.sh" \
-        --profile agent-vm --yes
 }
 
-create_machine() {
+ssh_prepare_guest() {
     local name="$1"
-    local requested_memory="${2:-}"
-    local memory
-    memory="$(choose_memory_mib "$requested_memory")"
-    configure_machine "$name"
+    echo "Ensuring guest prerequisites (sudo apt-get)..."
+    ssh_run "$name" bash -lc "
+        sudo apt-get update &&
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential ca-certificates curl git rsync &&
+        sudo touch /etc/devvm-agent
+    "
+}
 
-    if machine_exists "$name"; then
-        die "machine '$name' already exists"
+# Copy the local dotfiles checkout into the machine and extract as the dev user.
+push_dotfiles() {
+    local name="$1"
+    echo "Copying the local dotfiles checkout into '$name'..."
+    local archive
+    archive="$(make_dotfiles_archive)"
+    # shellcheck disable=SC2064
+    trap "rm -f '$archive'" RETURN
+
+    m_cp "$name" "$archive" "/tmp/devvm-dotfiles.tar.gz"
+    m_run "$name" bash -lc '
+        rm -rf "$HOME/.dotfiles" &&
+        mkdir -p "$HOME/.dotfiles" &&
+        tar -xzf /tmp/devvm-dotfiles.tar.gz -C "$HOME/.dotfiles" &&
+        if [[ -f "$HOME/.profile" && ! -L "$HOME/.profile" ]]; then
+            mv "$HOME/.profile" "$HOME/.profile.before-devvm"
+        fi
+        rm -f /tmp/devvm-dotfiles.tar.gz 2>/dev/null ||
+            sudo rm -f /tmp/devvm-dotfiles.tar.gz
+    '
+}
+
+bootstrap_machine() {
+    local name="$1"
+    load_machine "$name"
+    [[ "${UNMANAGED:-}" != "1" ]] ||
+        die "'$name' is unmanaged; refusing to bootstrap it"
+
+    "${BACKEND}_prepare_guest" "$name"
+    push_dotfiles "$name"
+    m_run_stream "$name" "\$HOME/.dotfiles/bootstrap.sh" --profile agent-vm --yes
+
+    if is_exposed_backend; then
+        seed_authorized_keys "$name"
+        if [[ "${HARDEN:-}" == "1" ]]; then
+            harden_machine "$name"
+        fi
     fi
-
-    local args=(
-        machine create
-        --name "$name"
-        --image "$IMAGE"
-        --net
-        --cpus "$CPUS"
-        --mem "$memory"
-        --storage "$STORAGE_GIB"
-        --env SMOLVM_GUEST=1
-    )
-    # Guard the expansion: an empty array under `set -u` is an error on
-    # bash < 4.4 (e.g. stock macOS bash 3.2).
-    if ((${#PORTS[@]})); then
-        local mapping
-        for mapping in "${PORTS[@]}"; do
-            args+=(--port "$mapping")
-        done
-    fi
-
-    echo "+ smolvm ${args[*]}"
-    echo "Using ${memory} MiB RAM."
-    smolvm "${args[@]}"
-    smolvm machine start --name "$name"
-
-    bootstrap_machine "$name"
-
-    cat <<EOF
-
-Machine '$name' is ready.
-
-Next:
-  devvm auth $name        # log in to github, codex, and claude
-  devvm repos $name
-  devvm shell $name
-EOF
 }
 
 clone_repos() {
     local name="$1"
-    configure_machine "$name"
-
-    if [[ ${#REPOS[@]} -eq 0 ]]; then
+    load_machine "$name"
+    if [[ -z "${REPOS// }" ]]; then
         echo "No repositories configured for '$name'."
-        echo "Edit configure_machine() in $0."
+        echo "Add REPOS=\"owner/repo ...\" to $(machine_conf "$name")."
         return
     fi
-
     local repo
-    for repo in "${REPOS[@]}"; do
-        as_dev "$name" bash -lc \
+    for repo in $REPOS; do
+        m_run "$name" bash -lc \
             "mkdir -p \"\$HOME/src\"; cd \"\$HOME/src\"; [[ -d \"${repo##*/}\" ]] || gh repo clone \"$repo\""
     done
 }
 
-# Open a URL in the host's default browser. The VM has no browser, so login
-# flows inside the guest hand their URL back out through this.
+# --- auth: host-browser bridge ---------------------------------------------
+
+# Open a URL in the host's default browser. The machine has no browser, so
+# login flows hand their URL back out through this.
 #
 # This is a guest->host channel, so treat the input as untrusted: only open
 # plain http(s) URLs. That blocks file://, mailto:, custom scheme handlers, and
-# option injection (a leading '-') that a compromised guest could otherwise use
-# to drive the host during an auth session.
+# option injection (a leading '-') a compromised guest could otherwise use.
 host_open_url() {
     local url="$1"
     case "$url" in
@@ -275,8 +517,8 @@ host_open_url() {
     fi
 }
 
-# Install a $BROWSER shim in the guest that appends URLs to $URL_OUTBOX instead
-# of trying to launch a (non-existent) browser, and start the outbox empty.
+# Install a $BROWSER shim in the machine that appends URLs to ~/.devvm/urls
+# instead of launching a (non-existent) browser, and start the outbox empty.
 ensure_url_bridge() {
     local name="$1"
     local helper
@@ -288,21 +530,20 @@ mkdir -p "$HOME/.devvm"
 printf '%s\n' "$1" >> "$HOME/.devvm/urls"
 echo "devvm: sent to host browser -> $1" >&2
 SH
-    smolvm machine cp "$helper" "$name:/usr/local/bin/devvm-open-url"
+    m_cp "$name" "$helper" "/tmp/devvm-open-url"
     rm -f "$helper"
-    smolvm machine exec --name "$name" -- bash -lc "
-        chmod 0755 /usr/local/bin/devvm-open-url &&
-        install -d -o '$VM_USER' -g '$VM_USER' -m 700 '/home/$VM_USER/.devvm' &&
-        : > '$URL_OUTBOX' &&
-        chown '$VM_USER:$VM_USER' '$URL_OUTBOX'
-    "
+    m_run "$name" bash -lc '
+        sudo install -m 0755 /tmp/devvm-open-url /usr/local/bin/devvm-open-url &&
+        rm -f /tmp/devvm-open-url &&
+        install -d -m 700 "$HOME/.devvm" &&
+        : > "$HOME/.devvm/urls"
+    '
 }
 
-# Tail the guest outbox and open each URL on the host. Runs until stopped.
+# Tail the machine outbox and open each URL on the host. Runs until stopped.
 start_url_watcher() {
     local name="$1"
-    smolvm machine exec --stream --name "$name" -- \
-        bash -lc "exec tail -F -n +1 '$URL_OUTBOX'" 2>/dev/null |
+    m_run_stream "$name" bash -lc "exec tail -F -n +1 \"\$HOME/.devvm/urls\"" 2>/dev/null |
         while IFS= read -r url; do
             [[ -n "$url" ]] || continue
             echo "devvm: opening on host -> $url" >&2
@@ -316,23 +557,43 @@ stop_url_watcher() {
     [[ -n "${URL_WATCHER_PID:-}" ]] || return 0
     kill "$URL_WATCHER_PID" 2>/dev/null || true
     wait "$URL_WATCHER_PID" 2>/dev/null || true
-    # smolvm doesn't propagate the kill to the guest, so reap the tail too.
-    smolvm machine exec --name "$URL_WATCHER_MACHINE" -- \
-        pkill -f "tail -F -n \+1 $URL_OUTBOX" 2>/dev/null || true
+    # The remote tail is a separate process; reap it too.
+    m_run "$URL_WATCHER_MACHINE" bash -lc \
+        'pkill -f "tail -F -n +1 $HOME/.devvm/urls"' 2>/dev/null || true
     URL_WATCHER_PID=""
 }
 
-# Run an interactive login with the host-browser shim wired in as $BROWSER.
+# Interactive login with the host-browser shim wired in as $BROWSER.
 run_login() {
-    local name="$1"
-    shift
-    smolvm machine exec -it --name "$name" -- \
-        sudo -iu "$VM_USER" env SMOLVM_GUEST=1 BROWSER=devvm-open-url "$@"
+    local name="$1"; shift
+    case "$BACKEND" in
+        smol)
+            smolvm machine exec -it --name "$name" -- \
+                sudo -iu "$VM_USER" env SMOLVM_GUEST=1 BROWSER=devvm-open-url "$@"
+            ;;
+        ssh)
+            need_cmd ssh
+            build_ssh_base
+            "${SSH_BASE[@]}" -t "$SSH_HOST" \
+                "$(ssh_wrap env BROWSER=devvm-open-url "$@")"
+            ;;
+    esac
 }
 
-# True if HOST:GUEST is already forwarded, so we can avoid a needless restart.
-# smolvm exposes only a port *count* via the CLI, so read the machine's own
-# on-disk config instead.
+# codex finishes OAuth via a callback on 127.0.0.1:1455 inside the machine.
+# Opening the URL on the host means the redirect lands on the host, so we route
+# the host's :1455 to the machine — smol via a (restarting) port mapping, ssh
+# via a transient -L on the login connection.
+prepare_codex_callback() {
+    local name="$1"
+    case "$BACKEND" in
+        smol) ensure_port "$name" "1455:1455" ;;
+        ssh)  SSH_FWD_1455="1" ;;
+    esac
+}
+
+# smol only: is HOST:GUEST already forwarded? (smolvm exposes only a count via
+# the CLI, so read the machine's on-disk config.)
 port_already_mapped() {
     local name="$1" mapping="$2"
     local dd config
@@ -343,8 +604,7 @@ port_already_mapped() {
     grep -qw "$host" "$config" && grep -qw "$guest" "$config"
 }
 
-# Ensure a HOST:GUEST port is forwarded. Ports can only change on a stopped
-# machine, so this restarts the VM (and drops any live tmux session).
+# smol only: ensure a mapping exists (ports change only on a stopped machine).
 ensure_port() {
     local name="$1" mapping="$2"
     if port_already_mapped "$name" "$mapping"; then
@@ -359,12 +619,8 @@ ensure_port() {
 login_tool() {
     local name="$1" tool="$2"
     case "$tool" in
-        github)
-            run_login "$name" gh auth login
-            ;;
-        codex)
-            run_login "$name" codex login
-            ;;
+        github) run_login "$name" gh auth login ;;
+        codex)  run_login "$name" codex login ;;
         claude)
             echo "Claude Code logs in on first launch; use /login if prompted." >&2
             run_login "$name" claude
@@ -378,20 +634,17 @@ authenticate() {
         github|codex|claude|all) ;;
         *) die "tool must be github, codex, claude, or all" ;;
     esac
+    load_machine "$name"
 
-    # codex completes OAuth through a callback on guest 127.0.0.1:1455. Opening
-    # the URL on the host means the redirect lands on the host, so forward the
-    # port back to the guest first. (Must happen before the watcher: forwarding
-    # restarts the VM.)
     case "$tool" in
-        codex|all) ensure_port "$name" "1455:1455" ;;
+        codex|all) prepare_codex_callback "$name" ;;
     esac
 
     ensure_url_bridge "$name"
     start_url_watcher "$name"
     trap 'stop_url_watcher' EXIT
 
-    if [[ "$tool" == all ]]; then
+    if [[ "$tool" == "all" ]]; then
         local t
         for t in github codex claude; do
             login_tool "$name" "$t" ||
@@ -405,22 +658,358 @@ authenticate() {
     trap - EXIT
 }
 
-# Emit machine names (with state as a tab-separated description) for shell
-# completion. Best-effort: prints nothing if smolvm or jq is unavailable.
-complete_machines() {
-    if command -v jq >/dev/null 2>&1; then
-        smolvm machine ls --json 2>/dev/null |
-            jq -r '.[] | "\(.name)\t\(.state)"' 2>/dev/null || true
+# --- ssh identity / key management -----------------------------------------
+
+# Resolve a KEY spec (host-side) into RESOLVED_KEYS[].
+resolve_pubkeys() {
+    RESOLVED_KEYS=()
+    local line f
+    case "${1:-}" in
+        --from-github)
+            [[ -n "${2:-}" ]] || die "authorize-key --from-github needs a USER"
+            need_cmd curl
+            while IFS= read -r line; do
+                [[ -n "$line" ]] && RESOLVED_KEYS+=("$line")
+            done < <(curl -fsSL "https://github.com/$2.keys")
+            ;;
+        "")
+            for f in "$HOME"/.ssh/id_*.pub; do
+                [[ -e "$f" ]] || continue
+                RESOLVED_KEYS+=("$(cat "$f")")
+            done
+            ;;
+        ssh-*|ecdsa-*|sk-*)
+            RESOLVED_KEYS+=("$*")
+            ;;
+        *)
+            [[ -f "$1" ]] || die "not a public-key file: $1"
+            RESOLVED_KEYS+=("$(cat "$1")")
+            ;;
+    esac
+    ((${#RESOLVED_KEYS[@]})) || die "no public keys resolved"
+}
+
+authorize_key() {
+    local name="$1"; shift
+    load_machine "$name"
+    require_ssh authorize-key
+    resolve_pubkeys "$@"
+    local key
+    for key in "${RESOLVED_KEYS[@]}"; do
+        m_run "$name" bash -lc "
+            install -d -m 700 \"\$HOME/.ssh\" &&
+            touch \"\$HOME/.ssh/authorized_keys\" &&
+            chmod 600 \"\$HOME/.ssh/authorized_keys\" &&
+            grep -qxF '$key' \"\$HOME/.ssh/authorized_keys\" ||
+                printf '%s\n' '$key' >> \"\$HOME/.ssh/authorized_keys\"
+        "
+    done
+    echo "devvm: authorized ${#RESOLVED_KEYS[@]} key(s) on '$name'"
+}
+
+# Seed authorized_keys from the machine's conf (used at bootstrap).
+seed_authorized_keys() {
+    local name="$1" u
+    for u in $AUTHORIZED_KEYS_GITHUB; do
+        authorize_key "$name" --from-github "$u"
+    done
+    local f
+    for f in $AUTHORIZED_KEYS; do
+        authorize_key "$name" "${f/#\~/$HOME}"
+    done
+}
+
+list_keys() {
+    local name="$1"
+    load_machine "$name"
+    require_ssh keys
+    m_run "$name" bash -lc '
+        f="$HOME/.ssh/authorized_keys"
+        [[ -f "$f" ]] || { echo "(no authorized_keys)"; exit 0; }
+        while IFS= read -r l; do
+            [[ -z "$l" || "$l" == \#* ]] && continue
+            ssh-keygen -l -f /dev/stdin <<<"$l" 2>/dev/null || echo "$l"
+        done < "$f"
+    '
+}
+
+revoke_key() {
+    local name="$1" pattern="$2"
+    load_machine "$name"
+    require_ssh revoke-key
+    m_run "$name" bash -lc "
+        f=\"\$HOME/.ssh/authorized_keys\"
+        [[ -f \"\$f\" ]] || { echo 'devvm: no authorized_keys'; exit 0; }
+        before=\$(wc -l <\"\$f\")
+        grep -vF -- '$pattern' \"\$f\" > \"\$f.tmp\" || true
+        mv \"\$f.tmp\" \"\$f\"
+        chmod 600 \"\$f\"
+        after=\$(wc -l <\"\$f\")
+        echo \"devvm: removed \$((before - after)) key line(s)\"
+    "
+}
+
+# --- ssh hardening / lockdown ----------------------------------------------
+
+harden_machine() {
+    local name="$1"
+    load_machine "$name"
+    require_ssh lockdown
+    if [[ "${UNMANAGED:-}" == "1" ]]; then
+        confirm "'$name' is an unmanaged host — really run lockdown on it?" ||
+            die "aborted"
+    fi
+
+    local sshport="${SSH_PORT:-22}"
+    local fail2ban="${FAIL2BAN:-}"
+    local script
+    script="$(mktemp)"
+    # Interpolate host-side values; the script itself runs as root in the guest.
+    cat >"$script" <<HARDEN
+#!/usr/bin/env bash
+set -euo pipefail
+SSH_PORT="$sshport"
+WANT_FAIL2BAN="$fail2ban"
+DEV_USER="\${SUDO_USER:-\$(logname 2>/dev/null || echo dev)}"
+AUTHKEYS="/home/\$DEV_USER/.ssh/authorized_keys"
+
+# Fail-safe: never disable password auth without a working key in place.
+if [[ ! -s "\$AUTHKEYS" ]]; then
+    echo "refusing to harden: \$AUTHKEYS is empty (would lock you out)" >&2
+    exit 1
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y ufw unattended-upgrades\${WANT_FAIL2BAN:+ fail2ban}
+
+# Firewall: default-deny inbound; SSH is the only public port. Everything else
+# is reached over the SSH -L tunnel.
+ufw --force reset
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow "\${SSH_PORT}/tcp"
+ufw --force enable
+
+# sshd hardening as a drop-in (validated before reload so we can't lock out).
+cat >/etc/ssh/sshd_config.d/10-devvm.conf <<SSHD
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+PubkeyAuthentication yes
+AllowUsers \$DEV_USER
+X11Forwarding no
+SSHD
+
+if sshd -t; then
+    systemctl reload ssh 2>/dev/null || systemctl reload sshd
+else
+    echo "sshd config invalid; removing drop-in" >&2
+    rm -f /etc/ssh/sshd_config.d/10-devvm.conf
+    exit 1
+fi
+
+# Automatic security updates.
+dpkg-reconfigure -f noninteractive unattended-upgrades || true
+systemctl enable --now unattended-upgrades 2>/dev/null || true
+
+[[ -n "\$WANT_FAIL2BAN" ]] && systemctl enable --now fail2ban 2>/dev/null || true
+
+echo "devvm: lockdown applied (firewall + sshd + auto-updates)"
+HARDEN
+
+    m_cp "$name" "$script" "/tmp/devvm-harden.sh"
+    rm -f "$script"
+    m_run "$name" bash -lc \
+        'sudo bash /tmp/devvm-harden.sh; rm -f /tmp/devvm-harden.sh'
+}
+
+# --- HETZNER (deferred) -----------------------------------------------------
+# A cloud backend slots in here as hetzner_{create,start,stop,delete,run,
+# run_it,run_stream,cp,status}. Only the provider lifecycle is new:
+#   - hetzner_create: `hcloud server create` (ubuntu-24.04, ssh key, location),
+#     wait for running, capture IP, write the machine conf + ssh config block,
+#     and inject the first AUTHORIZED_KEYS via cloud-init user-data.
+#   - pin_host_keys: read host-key fingerprints from the serial console and pin
+#     them into $KNOWN_HOSTS (upgrade from accept-new TOFU to verified).
+# Everything else (provisioning, auth, keys, tunnel, lockdown) already works via
+# the ssh backend, so the cloud backend reuses it verbatim.
+
+# --- create (smol) ---------------------------------------------------------
+
+create_machine() {
+    local name="$1"
+    local requested_memory="${2:-}"
+    need_smolvm
+
+    if [[ -f "$(machine_conf "$name")" ]] || smol_exists "$name"; then
+        die "machine '$name' already exists"
+    fi
+
+    local memory
+    memory="$(choose_memory_mib "$requested_memory")"
+
+    local args=(
+        machine create
+        --name "$name"
+        --image "$IMAGE"
+        --net
+        --cpus "$CPUS"
+        --mem "$memory"
+        --storage "$STORAGE_GIB"
+        --env SMOLVM_GUEST=1
+    )
+
+    echo "+ smolvm ${args[*]}"
+    echo "Using ${memory} MiB RAM."
+    smolvm "${args[@]}"
+    smolvm machine start --name "$name"
+
+    # Register before bootstrap so load_machine sees it.
+    BACKEND="smol" MEMORY="$memory"
+    UNMANAGED="" SSH_HOST="" SSH_PORT="22" IDENTITY="" REPOS="" PORTS=""
+    VNC_PORT="5901" MOSH_SERVER="" AUTHORIZED_KEYS="" AUTHORIZED_KEYS_GITHUB=""
+    HARDEN="" FAIL2BAN=""
+    save_machine_conf "$name"
+
+    bootstrap_machine "$name"
+
+    cat <<EOF
+
+Machine '$name' is ready.
+
+Next:
+  devvm auth $name        # log in to github, codex, and claude
+  devvm repos $name       # after adding REPOS to $(machine_conf "$name")
+  devvm shell $name
+EOF
+}
+
+suggested_memory_mib() {
+    local total_mib
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        total_mib=$(( $(sysctl -n hw.memsize) / 1024 / 1024 ))
     else
-        smolvm machine ls --json 2>/dev/null |
-            grep -oE '"name"[[:space:]]*:[[:space:]]*"[^"]*"' |
-            sed -E 's/.*"([^"]*)"$/\1/' || true
+        total_mib="$(awk '/^MemTotal:/ {print int($2 / 1024)}' /proc/meminfo)"
+    fi
+    local half_mib=$(( total_mib / 2 ))
+    if (( half_mib > 2048 )); then echo 2048
+    elif (( half_mib < 1024 )); then echo 1024
+    else echo "$half_mib"; fi
+}
+
+choose_memory_mib() {
+    local requested="${1:-}" suggested
+    suggested="$(suggested_memory_mib)"
+    if [[ -z "$requested" ]]; then
+        [[ -r /dev/tty ]] || die "no terminal available; pass --memory MiB"
+        read -r -p "VM memory in MiB [$suggested]: " requested < /dev/tty
+        requested="${requested:-$suggested}"
+    fi
+    [[ "$requested" =~ ^[0-9]+$ ]] || die "memory must be an integer number of MiB"
+    (( requested >= 512 )) || die "memory must be at least 512 MiB"
+    echo "$requested"
+}
+
+# --- status (aggregate) ----------------------------------------------------
+
+status_all() {
+    printf '%-20s %-8s %s\n' "NAME" "BACKEND" "STATE"
+    printf '%s\n' "----------------------------------------------------"
+
+    local smol_json=""
+    if command -v smolvm >/dev/null 2>&1; then
+        smol_json="$(smolvm machine ls --json 2>/dev/null || true)"
+    fi
+
+    local seen=" "
+    local name
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        seen+="$name "
+        load_machine "$name"
+        local state
+        if [[ "$BACKEND" == "smol" ]]; then
+            state="$(smol_state_from_json "$name" "$smol_json")"
+        elif ssh_tunnel_running; then
+            state="tunnel up"
+        else
+            state="tunnel down"
+        fi
+        printf '%-20s %-8s %s\n' "$name" "$BACKEND" "$state"
+    done < <(list_machines)
+
+    # Live smol machines that aren't in the registry.
+    if [[ -n "$smol_json" ]] && command -v jq >/dev/null 2>&1; then
+        local nm st
+        while IFS=$'\t' read -r nm st; do
+            [[ -n "$nm" ]] || continue
+            [[ "$seen" == *" $nm "* ]] && continue
+            printf '%-20s %-8s %s\n' "$nm" "smol" "$st (unregistered)"
+        done < <(jq -r '.[] | "\(.name)\t\(.state)"' <<<"$smol_json" 2>/dev/null)
     fi
 }
 
-# Completion backend. Receives the tokens already typed after `devvm` and
-# prints candidates (optionally "value<TAB>description") for the next token.
-# Shell completion files just forward the command line here.
+smol_state_from_json() {
+    local name="$1" json="$2"
+    [[ -n "$json" ]] && command -v jq >/dev/null 2>&1 || { echo "?"; return; }
+    jq -r --arg n "$name" '.[] | select(.name==$n) | .state' <<<"$json" 2>/dev/null |
+        head -1 | grep . || echo "not created"
+}
+
+# --- port ------------------------------------------------------------------
+
+add_port() {
+    local name="$1" mapping="$2"
+    load_machine "$name"
+    # Record it (dedup) then realize per backend.
+    case " $PORTS " in
+        *" $mapping "*) ;;
+        *) PORTS="${PORTS:+$PORTS }$mapping" ;;
+    esac
+    save_machine_conf "$name"
+    case "$BACKEND" in
+        smol)
+            smolvm machine stop --name "$name" 2>/dev/null || true
+            smolvm machine update --name "$name" --port "$mapping"
+            smolvm machine start --name "$name"
+            ;;
+        ssh)
+            if ssh_tunnel_running; then
+                echo "devvm: restarting tunnel with the new forward..."
+                ssh_tunnel_down
+                ssh_tunnel_up
+            else
+                echo "devvm: added; run 'devvm tunnel $name' to forward it."
+            fi
+            ;;
+    esac
+}
+
+# --- completion ------------------------------------------------------------
+
+# Machine names (registry ∪ live smol) with a state description.
+complete_machines() {
+    local seen=" "
+    local smol_json=""
+    command -v smolvm >/dev/null 2>&1 &&
+        smol_json="$(smolvm machine ls --json 2>/dev/null || true)"
+    local name
+    while IFS= read -r name; do
+        [[ -n "$name" ]] || continue
+        seen+="$name "
+        printf '%s\t%s\n' "$name" "registered"
+    done < <(list_machines)
+    if [[ -n "$smol_json" ]] && command -v jq >/dev/null 2>&1; then
+        local nm st
+        while IFS=$'\t' read -r nm st; do
+            [[ -n "$nm" ]] || continue
+            [[ "$seen" == *" $nm "* ]] && continue
+            printf '%s\t%s\n' "$nm" "$st"
+        done < <(jq -r '.[] | "\(.name)\t\(.state)"' <<<"$smol_json" 2>/dev/null)
+    fi
+}
+
 complete_command() {
     local -a words=("$@")
     local n=${#words[@]}
@@ -428,42 +1017,52 @@ complete_command() {
 
     if (( n == 0 )); then
         printf '%b' \
-            'create\tCreate and bootstrap a VM\n' \
-            'bootstrap\tResume/rerun guest provisioning\n' \
+            'create\tCreate and bootstrap a smol VM\n' \
+            'bootstrap\tResume/rerun provisioning\n' \
             'shell\tAttach to the dev tmux session\n' \
             'exec\tRun a command as the dev user\n' \
             'auth\tLog in to github, codex, claude\n' \
             'repos\tClone configured repositories\n' \
-            'port\tAdd a host:guest port mapping\n' \
-            'start\tStart the VM\n' \
-            'stop\tStop the VM\n' \
-            'status\tShow VM status\n' \
-            'delete\tDelete the VM\n' \
+            'port\tAdd a port mapping/forward\n' \
+            'start\tStart the machine\n' \
+            'stop\tStop the machine\n' \
+            'status\tShow status\n' \
+            'delete\tDelete the machine\n' \
+            'ssh\tOpen an interactive ssh shell\n' \
+            'tunnel\tManage the autossh tunnel\n' \
+            'mosh\tConnect via mosh\n' \
+            'vnc\tTunnel + open VNC\n' \
+            'authorize-key\tAdd an authorized client key\n' \
+            'keys\tList authorized keys\n' \
+            'revoke-key\tRemove authorized keys\n' \
+            'lockdown\tFirewall + sshd hardening\n' \
             'help\tShow help\n'
         return 0
     fi
 
     case "$sub" in
         auth)
-            if (( n == 1 )); then
-                complete_machines
-            elif (( n == 2 )); then
-                printf '%s\n' github codex claude all
+            if   (( n == 1 )); then complete_machines
+            elif (( n == 2 )); then printf '%s\n' github codex claude all
             fi
             ;;
-        bootstrap|shell|exec|repos|port|start|stop|status|delete)
-            if (( n == 1 )); then
-                complete_machines
+        tunnel)
+            if   (( n == 1 )); then complete_machines
+            elif (( n == 2 )); then printf '%s\n' up down status
             fi
+            ;;
+        bootstrap|shell|exec|repos|port|start|stop|status|delete|\
+        ssh|mosh|vnc|authorize-key|keys|revoke-key|lockdown)
+            (( n == 1 )) && complete_machines
             ;;
         create)
-            if (( n >= 2 )); then
-                printf '%b' '-m\tVM memory in MiB\n' '--memory\tVM memory in MiB\n'
-            fi
+            (( n >= 2 )) && printf '%b' '-m\tVM memory in MiB\n' '--memory\tVM memory in MiB\n'
             ;;
     esac
     return 0
 }
+
+# --- main ------------------------------------------------------------------
 
 main() {
     local command="${1:-}"
@@ -480,24 +1079,17 @@ main() {
             ;;
     esac
 
-    need_smolvm
-
     case "$command" in
         create)
             [[ $# -ge 2 ]] || die "usage: devvm create NAME [--memory MiB]"
-            local name="$2"
-            local memory=""
+            local name="$2" memory=""
             shift 2
             while [[ $# -gt 0 ]]; do
                 case "$1" in
                     -m|--memory)
                         [[ $# -ge 2 ]] || die "$1 requires a MiB value"
-                        memory="$2"
-                        shift 2
-                        ;;
-                    *)
-                        die "unknown create option '$1'"
-                        ;;
+                        memory="$2"; shift 2 ;;
+                    *) die "unknown create option '$1'" ;;
                 esac
             done
             create_machine "$name" "$memory"
@@ -506,15 +1098,16 @@ main() {
             [[ $# -eq 2 ]] || die "usage: devvm bootstrap NAME"
             bootstrap_machine "$2"
             ;;
-        shell)
-            [[ $# -eq 2 ]] || die "usage: devvm shell NAME"
-            as_dev_interactive "$2" tmux new-session -A -s dev
+        shell|ssh)
+            [[ $# -eq 2 ]] || die "usage: devvm $command NAME"
+            load_machine "$2"
+            m_run_it "$2" tmux new-session -A -s dev
             ;;
         exec)
             [[ $# -ge 3 ]] || die "usage: devvm exec NAME CMD..."
-            local name="$2"
-            shift 2
-            as_dev "$name" "$@"
+            local name="$2"; shift 2
+            load_machine "$name"
+            m_run "$name" "$@"
             ;;
         auth)
             [[ $# -ge 2 && $# -le 3 ]] ||
@@ -527,30 +1120,64 @@ main() {
             ;;
         port)
             [[ $# -eq 3 ]] || die "usage: devvm port NAME HOST:GUEST"
-            smolvm machine stop --name "$2" 2>/dev/null || true
-            smolvm machine update --name "$2" --port "$3"
-            smolvm machine start --name "$2"
+            add_port "$2" "$3"
             ;;
         start)
             [[ $# -eq 2 ]] || die "usage: devvm start NAME"
-            smolvm machine start --name "$2"
+            load_machine "$2"; "${BACKEND}_start" "$2"
             ;;
         stop)
             [[ $# -eq 2 ]] || die "usage: devvm stop NAME"
-            smolvm machine stop --name "$2"
+            load_machine "$2"; "${BACKEND}_stop" "$2"
+            ;;
+        delete)
+            [[ $# -eq 2 ]] || die "usage: devvm delete NAME"
+            load_machine "$2"; "${BACKEND}_delete" "$2"
             ;;
         status)
             if [[ $# -eq 1 ]]; then
-                smolvm machine ls --verbose
+                status_all
             elif [[ $# -eq 2 ]]; then
-                smolvm machine status --name "$2"
+                load_machine "$2"; "${BACKEND}_status" "$2"
             else
                 die "usage: devvm status [NAME]"
             fi
             ;;
-        delete)
-            [[ $# -eq 2 ]] || die "usage: devvm delete NAME"
-            smolvm machine delete --name "$2"
+        tunnel)
+            [[ $# -ge 2 && $# -le 3 ]] ||
+                die "usage: devvm tunnel NAME [up|down|status]"
+            load_machine "$2"; require_ssh tunnel
+            case "${3:-up}" in
+                up)     ssh_tunnel_up ;;
+                down)   ssh_tunnel_down ;;
+                status) ssh_status "$2" ;;
+                *) die "usage: devvm tunnel NAME [up|down|status]" ;;
+            esac
+            ;;
+        mosh)
+            [[ $# -eq 2 ]] || die "usage: devvm mosh NAME"
+            load_machine "$2"; require_ssh mosh; ssh_mosh
+            ;;
+        vnc)
+            [[ $# -eq 2 ]] || die "usage: devvm vnc NAME"
+            load_machine "$2"; require_ssh vnc; ssh_vnc
+            ;;
+        authorize-key)
+            [[ $# -ge 2 ]] || die "usage: devvm authorize-key NAME [KEY|--from-github USER]"
+            local name="$2"; shift 2
+            authorize_key "$name" "$@"
+            ;;
+        keys)
+            [[ $# -eq 2 ]] || die "usage: devvm keys NAME"
+            list_keys "$2"
+            ;;
+        revoke-key)
+            [[ $# -eq 3 ]] || die "usage: devvm revoke-key NAME PATTERN"
+            revoke_key "$2" "$3"
+            ;;
+        lockdown)
+            [[ $# -eq 2 ]] || die "usage: devvm lockdown NAME"
+            harden_machine "$2"
             ;;
         *)
             die "unknown command '$command'; run devvm --help"

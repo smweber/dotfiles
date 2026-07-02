@@ -28,35 +28,56 @@ created by `devvm` contain `/etc/devvm-agent`, so the same bootstrap
 automatically uses the `agent-vm` profile and installs Codex and Claude Code
 there.
 
-## Isolated development VMs
+## Dev machines (`devvm`)
 
-`devvm` is a small wrapper around persistent smolvm machines:
+`devvm` is one frontend for persistent dev boxes across backends:
+
+- **`smol`** — local, isolated [smolvm](https://smolmachines.com) microVMs.
+- **`ssh`** — an existing SSH host (this subsumes the old `devtunnel`, which is
+  now a thin shim over `devvm … scottdev3`).
+- a cloud (`hetzner`) backend is stubbed for later; the ssh backend already
+  carries the provisioning, auth, key-management, and hardening it will reuse.
 
 ```bash
-devvm create client-a
+devvm create client-a              # local smol VM
 devvm create client-b --memory 4096
-devvm bootstrap client-a  # resume/rerun provisioning
-devvm auth client-a       # log in to github, codex, and claude
-devvm auth client-a codex # or just one tool
+devvm auth client-a                # log in to github, codex, and claude
 devvm shell client-a
+devvm status                       # list every machine + state
 
-devvm port client-a 3000:3000
-devvm stop client-a
-devvm status
+# ssh machines
+devvm exec scottdev3 hostname
+devvm tunnel scottdev3             # autossh port forwards (up/down/status)
+devvm mosh scottdev3 ; devvm vnc scottdev3
+devvm authorize-key scottdev3 --from-github sweber   # add a client key
+devvm keys scottdev3 ; devvm revoke-key scottdev3 laptop
+devvm lockdown scottdev3           # firewall + sshd hardening (opt-in)
 ```
 
-Repositories and default port mappings are hardcoded in the readable
-`configure_machine()` function near the top of `bin/devvm`. Repositories live
-only on the VM's persistent disk; no host directories or SSH agent are mounted.
-Authentication happens inside each VM. Because the guest has no browser,
+Per-machine config lives in `~/.config/devvm/machines/<name>.conf` (sourced
+bash; hand-editable). `create` writes one automatically; ssh hosts are added by
+dropping in a conf with `BACKEND=ssh` and `SSH_HOST=`. Repositories live only on
+the machine's disk; no host directories or SSH agent are mounted.
+
+For ssh/cloud machines, `authorized_keys` is seeded at bootstrap from
+`AUTHORIZED_KEYS_GITHUB` (GitHub `.keys`) / `AUTHORIZED_KEYS`, and managed later
+with `authorize-key` / `keys` / `revoke-key` — the model for reaching one box
+from many client hosts. Managed hosts use an isolated `known_hosts`
+(`accept-new` TOFU). `lockdown` (opt-in via `HARDEN=1` or the verb) sets a
+default-deny firewall (SSH-only; dev ports stay tunnel-reachable), disables
+password/root SSH login, and enables unattended security upgrades — fail-safe
+(`sshd -t` + reload, and it refuses to run without a working key in place).
+
+Authentication happens inside each machine. Because it has no browser,
 `devvm auth` points `$BROWSER` at a shim that streams login URLs back to the
 host, where they open in the host's default browser; tools that ignore
 `$BROWSER` simply print the URL in the terminal as before. `devvm auth NAME`
 with no tool logs in to all of github, codex, and claude in turn. Since the
-outbox is a guest→host channel, the watcher only opens plain `http(s)` URLs
+outbox is a machine→host channel, the watcher only opens plain `http(s)` URLs
 (no `file://`, custom schemes, or option injection). codex completes its OAuth
-on a guest-side `127.0.0.1:1455` callback, so authing codex first forwards
-`1455:1455` (a one-time VM restart) so the host redirect reaches the guest.
+on a `127.0.0.1:1455` callback inside the machine, so authing codex routes the
+host's `:1455` back in — a smol port mapping (one-time restart) or, for ssh, a
+transient `-L` on the login connection.
 Creation prompts for memory with a host-aware default capped at 2 GiB; pass
 `--memory MiB` to skip the prompt. `devvm shell` attaches to a persistent tmux
 session. Subcommands, machine names, and auth tools tab-complete in fish.
