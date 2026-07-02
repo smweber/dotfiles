@@ -1,0 +1,5 @@
+# ~/.zshrc - deliberately minimal. Real shell config lives in fish, which
+# tmux launches via default-command; zsh only needs enough to run the
+# ~/.dotfiles/bin tools (devvm etc.) outside tmux.
+
+export PATH="$PATH:$HOME/.dotfiles/bin"

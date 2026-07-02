@@ -246,6 +246,26 @@ main() {
     fi
 
     # -------------------------------------------------------------------------
+    # Hostname (interactive only - there's nothing sensible to auto-answer)
+    # -------------------------------------------------------------------------
+    if [[ "$PROFILE" == "host" ]] && [[ "${ASSUME_YES:-0}" != "1" ]]; then
+        step "Set hostname"
+        info "Current hostname: $(hostname)"
+        if ask "Set a new hostname?"; then
+            read -r -p "New hostname: " new_hostname < /dev/tty
+            if [[ -z "$new_hostname" ]]; then
+                info "No name entered, skipping"
+            elif [[ "$OS" == "macos" ]]; then
+                run sudo scutil --set ComputerName "$new_hostname"
+                run sudo scutil --set HostName "$new_hostname"
+                run sudo scutil --set LocalHostName "$new_hostname"
+            else
+                run sudo hostnamectl set-hostname "$new_hostname"
+            fi
+        fi
+    fi
+
+    # -------------------------------------------------------------------------
     # Generate SSH key
     # -------------------------------------------------------------------------
     if [[ "$PROFILE" == "host" ]]; then
@@ -421,27 +441,12 @@ main() {
     fi
 
     # -------------------------------------------------------------------------
-    # Set fish as the default login shell
+    # Machine-local profile
     # -------------------------------------------------------------------------
-    step "Set fish as default shell"
-    FISH_PATH="$(command -v fish || true)"
-    LOGIN_USER="${USER:-$(id -un)}"
-    # $SHELL is stale after chsh in the same session; ask the user database.
-    LOGIN_SHELL="$(getent passwd "$LOGIN_USER" 2>/dev/null | cut -d: -f7)"
-    LOGIN_SHELL="${LOGIN_SHELL:-${SHELL:-}}"
-    if [[ -z "$FISH_PATH" ]]; then
-        info "fish not found, skipping"
-    elif [[ "$LOGIN_SHELL" == "$FISH_PATH" ]]; then
-        info "fish is already the default shell"
-    elif ask "Set fish as your default login shell?"; then
-        grep -qx "$FISH_PATH" /etc/shells 2>/dev/null || \
-            run_sh "echo '$FISH_PATH' | sudo tee -a /etc/shells >/dev/null"
-        if [[ "$PROFILE" == "agent-vm" ]]; then
-            run sudo chsh -s "$FISH_PATH" "$LOGIN_USER"
-        else
-            run chsh -s "$FISH_PATH"
-        fi
-    fi
+    # (fish stays a tmux default-command, not the login shell - see tmux.conf.)
+    # config.fish parses ~/.local_profile on startup; create it so fish
+    # doesn't error on a fresh machine.
+    [[ -f ~/.local_profile ]] || run touch ~/.local_profile
 
     # -------------------------------------------------------------------------
     # Profile-specific tools
@@ -525,6 +530,19 @@ main() {
         echo ""
         warn "Remember to install these manually:"
         info "  - $LINUX_MANUAL"
+    fi
+
+    # -------------------------------------------------------------------------
+    # paneru service (macOS scrolling window manager, installed by Brewfile.macos)
+    # -------------------------------------------------------------------------
+    if [[ "$OS" == "macos" ]] && has paneru; then
+        step "Start paneru (scrolling window manager)"
+        if ask "Register paneru as a login service and start it?"; then
+            run paneru install
+            run paneru start
+            info "If macOS just prompted for Accessibility permission, grant it"
+            info "in System Settings, then run: paneru restart"
+        fi
     fi
 
     # -------------------------------------------------------------------------

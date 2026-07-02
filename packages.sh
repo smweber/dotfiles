@@ -8,7 +8,7 @@
 # ----------------------------------------------------------------------------
 # Stow packages (subdirectories in ~/.dotfiles)
 # ----------------------------------------------------------------------------
-STOW_COMMON="sh tmux fish git jj nvim"
+STOW_COMMON="sh tmux fish git jj nvim devvm"
 STOW_MACOS="alacritty aerospace paneru"
 STOW_LINUX_GUI="alacritty i3 rofi polybar niri waybar"
 
