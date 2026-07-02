@@ -1923,18 +1923,32 @@ main() {
         __fwd-exec)
             # Guest end of a smol forward, run once per connection by socat.
             # Splices this process's stdio (the host socket) to the guest's
-            # port over `machine exec --stream`, using a dependency-free bash
-            # /dev/tcp bridge so the guest needs nothing installed.
+            # port over `machine exec`, using a dependency-free bash /dev/tcp
+            # bridge so the guest needs nothing installed.
+            #
+            # -i keeps stdin open and forwards it (the inbound request bytes);
+            # --stream returns the guest's output as it arrives. Both are
+            # required for a full-duplex bridge -- with --stream alone the guest
+            # never receives the request and every connection hangs. No -t: a
+            # PTY would corrupt the binary stream with CR/LF translation.
+            #
+            # Bridge structure matters. The RESPONSE relay (socket -> stdout)
+            # must be the foreground command so the exec lives until the guest
+            # closes the connection; backgrounding it instead lets bash tear it
+            # down as soon as the writer's stdin EOFs, truncating the reply. The
+            # backgrounded REQUEST relay needs an explicit `<&0`, or bash's
+            # async-command default reassigns its stdin to /dev/null and no
+            # request bytes ever reach the guest.
             shift
             [[ $# -eq 2 ]] || die "usage: devvm __fwd-exec NAME GUESTPORT"
             valid_name "$1"
             [[ "$2" =~ ^[0-9]+$ ]] || die "guest port must be numeric"
             need_smolvm
-            exec smolvm machine exec --stream --name "$1" -- bash -c '
+            exec smolvm machine exec -i --stream --name "$1" -- bash -c '
                 exec 3<>"/dev/tcp/127.0.0.1/$0" || exit 1
-                cat <&3 & c=$!
-                cat >&3
-                kill "$c" 2>/dev/null
+                cat <&0 >&3 &      # host request bytes -> guest port
+                cat <&3            # guest response bytes -> host (foreground)
+                kill $! 2>/dev/null
             ' "$2"
             ;;
         -h|--help|help|"")
