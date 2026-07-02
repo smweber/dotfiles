@@ -29,7 +29,7 @@ usage() {
 Usage:
   devvm create NAME [--memory MiB]   Create + bootstrap a local smol VM
   devvm bootstrap NAME               Resume/rerun guest provisioning
-  devvm shell NAME                   Attach to the dev tmux session
+  devvm shell NAME                   Attach to the dev tmux session (local VMs)
   devvm exec NAME CMD...             Run a command as the dev user
   devvm auth NAME [TOOL]             Log in to github/codex/claude (all if omitted);
                                      login URLs open in the host browser
@@ -39,7 +39,7 @@ Usage:
   devvm status [NAME]                Machine status; no NAME lists all machines
 
   Remote (ssh) machines only:
-  devvm ssh NAME                     Open an interactive shell
+  devvm ssh NAME                     Attach to the dev tmux session over ssh
   devvm tunnel NAME [up|down|status] autossh port forwards (default: up)
   devvm mosh NAME                    Connect via mosh
   devvm vnc NAME                     Tunnel (if needed) + open VNC
@@ -81,6 +81,12 @@ need_cmd() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is not installed on this host"
 }
 
+# Machine names end up in file paths and process patterns; keep them tame.
+valid_name() {
+    [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ||
+        die "invalid machine name '$1' (use letters, digits, . _ -)"
+}
+
 # --- registry --------------------------------------------------------------
 
 registry_dir() {
@@ -95,6 +101,7 @@ machine_conf() {
 # about are treated as smol machines (keeps pre-registry VMs working).
 load_machine() {
     local name="$1"
+    valid_name "$name"
     BACKEND="" UNMANAGED="" SSH_HOST="" SSH_PORT="22" IDENTITY=""
     MEMORY="" REPOS="" PORTS="" VNC_PORT="5901" MOSH_SERVER=""
     AUTHORIZED_KEYS="" AUTHORIZED_KEYS_GITHUB="" HARDEN="" FAIL2BAN=""
@@ -199,6 +206,7 @@ smol_stop()  { need_smolvm; smolvm machine stop  --name "$1"; }
 
 smol_delete() {
     need_smolvm
+    confirm "Delete VM '$1' and its disk (irreversible)?" || die "aborted"
     smolvm machine delete --name "$1"
     rm -f "$(machine_conf "$1")"
 }
@@ -207,21 +215,30 @@ smol_status() { need_smolvm; smolvm machine status --name "$1"; }
 
 # --- backend: ssh ----------------------------------------------------------
 
+# Shared port/identity/known_hosts flags for ssh-family commands, in SSH_FLAGS.
+# $1 is the port flag: -p for ssh/autossh, -P for scp.
+build_ssh_flags() {
+    SSH_FLAGS=()
+    [[ "${SSH_PORT:-22}" != "22" ]] && SSH_FLAGS+=("$1" "$SSH_PORT")
+    [[ -n "${IDENTITY:-}" ]]        && SSH_FLAGS+=(-i "${IDENTITY/#\~/$HOME}")
+    # Managed (non-unmanaged) hosts get an isolated, TOFU-pinned known_hosts.
+    if [[ "${MANAGED_SSH:-}" == "1" ]]; then
+        SSH_FLAGS+=(-o "UserKnownHostsFile=$KNOWN_HOSTS"
+                    -o StrictHostKeyChecking=accept-new)
+    fi
+    return 0
+}
+
 # Build the shared ssh option array (SSH_BASE) from the loaded machine globals.
 build_ssh_base() {
+    build_ssh_flags -p
     SSH_BASE=(ssh)
-    [[ "${SSH_PORT:-22}" != "22" ]] && SSH_BASE+=(-p "$SSH_PORT")
-    [[ -n "${IDENTITY:-}" ]]        && SSH_BASE+=(-i "${IDENTITY/#\~/$HOME}")
+    if ((${#SSH_FLAGS[@]})); then SSH_BASE+=("${SSH_FLAGS[@]}"); fi
     # Reuse one connection for concurrent sessions (e.g. login + URL watcher).
     mkdir -p "$CONFIG_DIR"
     SSH_BASE+=(-o ControlMaster=auto
                -o "ControlPath=$CONFIG_DIR/cm-%C"
                -o ControlPersist=60)
-    # Managed (non-unmanaged) hosts get an isolated, TOFU-pinned known_hosts.
-    if [[ "${MANAGED_SSH:-}" == "1" ]]; then
-        SSH_BASE+=(-o "UserKnownHostsFile=$KNOWN_HOSTS"
-                   -o StrictHostKeyChecking=accept-new)
-    fi
     [[ "${SSH_FWD_1455:-}" == "1" ]] && SSH_BASE+=(-L 1455:localhost:1455)
     return 0
 }
@@ -259,18 +276,18 @@ ssh_run_stream() { ssh_run "$@"; }
 ssh_cp() {
     need_cmd scp
     local name="$1" src="$2" dest="$3"
+    build_ssh_flags -P
     local -a o=(scp)
-    [[ "${SSH_PORT:-22}" != "22" ]] && o+=(-P "$SSH_PORT")
-    [[ -n "${IDENTITY:-}" ]]        && o+=(-i "${IDENTITY/#\~/$HOME}")
+    if ((${#SSH_FLAGS[@]})); then o+=("${SSH_FLAGS[@]}"); fi
     "${o[@]}" "$src" "$SSH_HOST:$dest"
 }
 
-ssh_unmanaged_noop() {
-    echo "devvm: '$MACHINE_NAME' is an unmanaged ssh host; '$1' is a no-op." >&2
+ssh_lifecycle_noop() {
+    echo "devvm: '$MACHINE_NAME' is an ssh host; devvm does not manage its power ('$1' is a no-op)." >&2
 }
 
-ssh_start()  { ssh_unmanaged_noop start; }
-ssh_stop()   { ssh_unmanaged_noop stop; }
+ssh_start()  { ssh_lifecycle_noop start; }
+ssh_stop()   { ssh_lifecycle_noop stop; }
 ssh_delete() {
     if [[ "${UNMANAGED:-}" == "1" ]]; then
         confirm "Remove registry entry for unmanaged host '$1' (leaves the host untouched)?" ||
@@ -293,7 +310,8 @@ ssh_status() {
 
 # --- ssh tunnel / mosh / vnc (from devtunnel) ------------------------------
 
-autossh_pattern() { echo "autossh.*${SSH_HOST}\\b"; }
+# Matches only the autossh we start in ssh_tunnel_up (host is its last arg).
+autossh_pattern() { printf 'autossh.*[[:space:]]%s$' "${SSH_HOST//./\\.}"; }
 
 ssh_tunnel_running() { pgrep -f "$(autossh_pattern)" >/dev/null 2>&1; }
 
@@ -313,11 +331,11 @@ ssh_tunnel_up() {
         return 0
     fi
     ssh_forwards
+    build_ssh_flags -p
     local -a args=(-M 0 -N -f
         -o ServerAliveInterval=30 -o ServerAliveCountMax=3
         -o ExitOnForwardFailure=yes)
-    [[ "${SSH_PORT:-22}" != "22" ]] && args+=(-p "$SSH_PORT")
-    [[ -n "${IDENTITY:-}" ]]        && args+=(-i "${IDENTITY/#\~/$HOME}")
+    if ((${#SSH_FLAGS[@]})); then args+=("${SSH_FLAGS[@]}"); fi
     if ((${#FWD[@]})); then args+=("${FWD[@]}"); fi
     args+=("$SSH_HOST")
     autossh "${args[@]}"
@@ -333,8 +351,13 @@ ssh_tunnel_down() {
         echo "devvm: no tunnel running"
         return 0
     fi
-    pkill -f "$(autossh_pattern)" 2>/dev/null || true
-    pkill -f "ssh.*${SSH_HOST}\\b" 2>/dev/null || true
+    # Kill only our autossh and its ssh child; a broad "ssh.*host" pkill would
+    # also take down interactive sessions and control masters to this host.
+    local pid
+    for pid in $(pgrep -f "$(autossh_pattern)"); do
+        pkill -P "$pid" 2>/dev/null || true
+        kill "$pid" 2>/dev/null || true
+    done
     sleep 0.5
     ssh_tunnel_running && die "failed to stop tunnel"
     echo "devvm: tunnel stopped"
@@ -345,10 +368,12 @@ check_ports() {
     for p in $PORTS; do
         if [[ "$p" == *:* ]]; then h="${p%%:*}"; else h="$p"; fi
         local listening
+        # `|| true`: grep -c exits 1 on a zero count, which set -e would
+        # otherwise turn into a script exit right here.
         if [[ "$(uname -s)" == "Darwin" ]]; then
-            listening=$(lsof -iTCP:"$h" -sTCP:LISTEN -P -n 2>/dev/null | grep -c LISTEN)
+            listening=$(lsof -iTCP:"$h" -sTCP:LISTEN -P -n 2>/dev/null | grep -c LISTEN || true)
         else
-            listening=$(ss -tlnp 2>/dev/null | grep -c ":${h} ")
+            listening=$(ss -tlnp 2>/dev/null | grep -c ":${h} " || true)
         fi
         if [[ "$listening" -gt 0 ]]; then
             printf '    %-6s listening\n' "$h"
@@ -566,18 +591,7 @@ stop_url_watcher() {
 # Interactive login with the host-browser shim wired in as $BROWSER.
 run_login() {
     local name="$1"; shift
-    case "$BACKEND" in
-        smol)
-            smolvm machine exec -it --name "$name" -- \
-                sudo -iu "$VM_USER" env SMOLVM_GUEST=1 BROWSER=devvm-open-url "$@"
-            ;;
-        ssh)
-            need_cmd ssh
-            build_ssh_base
-            "${SSH_BASE[@]}" -t "$SSH_HOST" \
-                "$(ssh_wrap env BROWSER=devvm-open-url "$@")"
-            ;;
-    esac
+    m_run_it "$name" env BROWSER=devvm-open-url "$@"
 }
 
 # codex finishes OAuth via a callback on 127.0.0.1:1455 inside the machine.
@@ -610,7 +624,7 @@ ensure_port() {
     if port_already_mapped "$name" "$mapping"; then
         return 0
     fi
-    echo "devvm: forwarding $mapping for the login callback (restarting VM)..." >&2
+    echo "devvm: adding port mapping $mapping (restarting VM)..." >&2
     smolvm machine stop --name "$name" 2>/dev/null || true
     smolvm machine update --name "$name" --port "$mapping"
     smolvm machine start --name "$name"
@@ -694,28 +708,33 @@ authorize_key() {
     load_machine "$name"
     require_ssh authorize-key
     resolve_pubkeys "$@"
+    # The key travels as an argv element ($1), not spliced into the script:
+    # both backends quote argv safely, and keys/comments may contain quotes.
     local key
     for key in "${RESOLVED_KEYS[@]}"; do
-        m_run "$name" bash -lc "
-            install -d -m 700 \"\$HOME/.ssh\" &&
-            touch \"\$HOME/.ssh/authorized_keys\" &&
-            chmod 600 \"\$HOME/.ssh/authorized_keys\" &&
-            grep -qxF '$key' \"\$HOME/.ssh/authorized_keys\" ||
-                printf '%s\n' '$key' >> \"\$HOME/.ssh/authorized_keys\"
-        "
+        m_run "$name" bash -lc '
+            install -d -m 700 "$HOME/.ssh" &&
+            touch "$HOME/.ssh/authorized_keys" &&
+            chmod 600 "$HOME/.ssh/authorized_keys" &&
+            grep -qxF "$1" "$HOME/.ssh/authorized_keys" ||
+                printf "%s\n" "$1" >> "$HOME/.ssh/authorized_keys"
+        ' _ "$key"
     done
     echo "devvm: authorized ${#RESOLVED_KEYS[@]} key(s) on '$name'"
 }
 
-# Seed authorized_keys from the machine's conf (used at bootstrap).
+# Seed authorized_keys from the machine's conf (used at bootstrap). Runs each
+# entry in a subshell so one bad source (e.g. a keyless github user, which
+# makes authorize_key die) warns instead of aborting the whole bootstrap.
 seed_authorized_keys() {
-    local name="$1" u
+    local name="$1" u f
     for u in $AUTHORIZED_KEYS_GITHUB; do
-        authorize_key "$name" --from-github "$u"
+        (authorize_key "$name" --from-github "$u") ||
+            echo "devvm: warning: no keys added for github user '$u'" >&2
     done
-    local f
     for f in $AUTHORIZED_KEYS; do
-        authorize_key "$name" "${f/#\~/$HOME}"
+        (authorize_key "$name" "${f/#\~/$HOME}") ||
+            echo "devvm: warning: no keys added from '$f'" >&2
     done
 }
 
@@ -737,16 +756,16 @@ revoke_key() {
     local name="$1" pattern="$2"
     load_machine "$name"
     require_ssh revoke-key
-    m_run "$name" bash -lc "
-        f=\"\$HOME/.ssh/authorized_keys\"
-        [[ -f \"\$f\" ]] || { echo 'devvm: no authorized_keys'; exit 0; }
-        before=\$(wc -l <\"\$f\")
-        grep -vF -- '$pattern' \"\$f\" > \"\$f.tmp\" || true
-        mv \"\$f.tmp\" \"\$f\"
-        chmod 600 \"\$f\"
-        after=\$(wc -l <\"\$f\")
-        echo \"devvm: removed \$((before - after)) key line(s)\"
-    "
+    m_run "$name" bash -lc '
+        f="$HOME/.ssh/authorized_keys"
+        [[ -f "$f" ]] || { echo "devvm: no authorized_keys"; exit 0; }
+        before=$(wc -l <"$f")
+        grep -vF -- "$1" "$f" > "$f.tmp" || true
+        mv "$f.tmp" "$f"
+        chmod 600 "$f"
+        after=$(wc -l <"$f")
+        echo "devvm: removed $((before - after)) key line(s)"
+    ' _ "$pattern"
 }
 
 # --- ssh hardening / lockdown ----------------------------------------------
@@ -840,6 +859,7 @@ HARDEN
 create_machine() {
     local name="$1"
     local requested_memory="${2:-}"
+    valid_name "$name"
     need_smolvm
 
     if [[ -f "$(machine_conf "$name")" ]] || smol_exists "$name"; then
@@ -913,20 +933,42 @@ choose_memory_mib() {
 
 # --- status (aggregate) ----------------------------------------------------
 
+smol_ls_json() {
+    command -v smolvm >/dev/null 2>&1 || return 0
+    smolvm machine ls --json 2>/dev/null || true
+}
+
+# Emit "name<TAB>state" for live smol machines not already in $2 (a
+# space-delimited, space-padded name list).
+unregistered_smol() {
+    local json="$1" seen="$2"
+    [[ -n "$json" ]] && command -v jq >/dev/null 2>&1 || return 0
+    local nm st
+    while IFS=$'\t' read -r nm st; do
+        [[ -n "$nm" ]] || continue
+        [[ "$seen" == *" $nm "* ]] && continue
+        printf '%s\t%s\n' "$nm" "$st"
+    done < <(jq -r '.[] | "\(.name)\t\(.state)"' <<<"$json" 2>/dev/null)
+}
+
 status_all() {
     printf '%-20s %-8s %s\n' "NAME" "BACKEND" "STATE"
     printf '%s\n' "----------------------------------------------------"
 
-    local smol_json=""
-    if command -v smolvm >/dev/null 2>&1; then
-        smol_json="$(smolvm machine ls --json 2>/dev/null || true)"
-    fi
+    local smol_json
+    smol_json="$(smol_ls_json)"
 
     local seen=" "
     local name
     while IFS= read -r name; do
         [[ -n "$name" ]] || continue
         seen+="$name "
+        # Probe in a subshell first: a malformed conf makes load_machine die,
+        # which must not take the whole listing down with it.
+        if ! (load_machine "$name") >/dev/null 2>&1; then
+            printf '%-20s %-8s %s\n' "$name" "?" "broken conf"
+            continue
+        fi
         load_machine "$name"
         local state
         if [[ "$BACKEND" == "smol" ]]; then
@@ -940,14 +982,10 @@ status_all() {
     done < <(list_machines)
 
     # Live smol machines that aren't in the registry.
-    if [[ -n "$smol_json" ]] && command -v jq >/dev/null 2>&1; then
-        local nm st
-        while IFS=$'\t' read -r nm st; do
-            [[ -n "$nm" ]] || continue
-            [[ "$seen" == *" $nm "* ]] && continue
-            printf '%-20s %-8s %s\n' "$nm" "smol" "$st (unregistered)"
-        done < <(jq -r '.[] | "\(.name)\t\(.state)"' <<<"$smol_json" 2>/dev/null)
-    fi
+    local nm st
+    while IFS=$'\t' read -r nm st; do
+        printf '%-20s %-8s %s\n' "$nm" "smol" "$st (unregistered)"
+    done < <(unregistered_smol "$smol_json" "$seen")
 }
 
 smol_state_from_json() {
@@ -970,9 +1008,7 @@ add_port() {
     save_machine_conf "$name"
     case "$BACKEND" in
         smol)
-            smolvm machine stop --name "$name" 2>/dev/null || true
-            smolvm machine update --name "$name" --port "$mapping"
-            smolvm machine start --name "$name"
+            ensure_port "$name" "$mapping"
             ;;
         ssh)
             if ssh_tunnel_running; then
@@ -991,23 +1027,13 @@ add_port() {
 # Machine names (registry ∪ live smol) with a state description.
 complete_machines() {
     local seen=" "
-    local smol_json=""
-    command -v smolvm >/dev/null 2>&1 &&
-        smol_json="$(smolvm machine ls --json 2>/dev/null || true)"
     local name
     while IFS= read -r name; do
         [[ -n "$name" ]] || continue
         seen+="$name "
         printf '%s\t%s\n' "$name" "registered"
     done < <(list_machines)
-    if [[ -n "$smol_json" ]] && command -v jq >/dev/null 2>&1; then
-        local nm st
-        while IFS=$'\t' read -r nm st; do
-            [[ -n "$nm" ]] || continue
-            [[ "$seen" == *" $nm "* ]] && continue
-            printf '%s\t%s\n' "$nm" "$st"
-        done < <(jq -r '.[] | "\(.name)\t\(.state)"' <<<"$smol_json" 2>/dev/null)
-    fi
+    unregistered_smol "$(smol_ls_json)" "$seen"
 }
 
 complete_command() {
@@ -1019,7 +1045,7 @@ complete_command() {
         printf '%b' \
             'create\tCreate and bootstrap a smol VM\n' \
             'bootstrap\tResume/rerun provisioning\n' \
-            'shell\tAttach to the dev tmux session\n' \
+            'shell\tAttach to the dev tmux session (local VMs)\n' \
             'exec\tRun a command as the dev user\n' \
             'auth\tLog in to github, codex, claude\n' \
             'repos\tClone configured repositories\n' \
@@ -1028,7 +1054,7 @@ complete_command() {
             'stop\tStop the machine\n' \
             'status\tShow status\n' \
             'delete\tDelete the machine\n' \
-            'ssh\tOpen an interactive ssh shell\n' \
+            'ssh\tAttach to the dev tmux session over ssh\n' \
             'tunnel\tManage the autossh tunnel\n' \
             'mosh\tConnect via mosh\n' \
             'vnc\tTunnel + open VNC\n' \
@@ -1098,9 +1124,18 @@ main() {
             [[ $# -eq 2 ]] || die "usage: devvm bootstrap NAME"
             bootstrap_machine "$2"
             ;;
-        shell|ssh)
-            [[ $# -eq 2 ]] || die "usage: devvm $command NAME"
+        shell)
+            [[ $# -eq 2 ]] || die "usage: devvm shell NAME"
             load_machine "$2"
+            [[ "$BACKEND" == "smol" ]] ||
+                die "'$2' is a remote ($BACKEND) machine; use 'devvm ssh $2'"
+            m_run_it "$2" tmux new-session -A -s dev
+            ;;
+        ssh)
+            [[ $# -eq 2 ]] || die "usage: devvm ssh NAME"
+            load_machine "$2"
+            [[ "$BACKEND" == "ssh" ]] ||
+                die "'$2' is a local ($BACKEND) VM; use 'devvm shell $2'"
             m_run_it "$2" tmux new-session -A -s dev
             ;;
         exec)
