@@ -21,6 +21,8 @@ cask "slack"
 cask "firefox"
 cask "1password"
 cask "choosy"
+cask "claude"
+cask "chatgpt"
 
 # Window manager (uncomment if desired)
 # tap  "nikitabobko/tap"
