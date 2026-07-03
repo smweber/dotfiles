@@ -431,9 +431,15 @@ smol_ensure_mux_guest() {      # NAME
         tr -d '[:space:]')"
     [[ -n "$sum" && "$sum" == "$guest_sum" ]] && return 0
     echo "devvm: installing devvm-mux ($tag) into '$name'..." >&2
-    smolvm machine cp "$bin" "$name:/tmp/devvm-mux.new"
+    # Stage under the VM user's home, not /tmp: `machine cp` writes to the root
+    # overlay's on-disk tree, but /tmp is a tmpfs mounted over it at runtime, so
+    # a file cp'd to /tmp is shadowed and invisible to `machine exec`. Home is
+    # on the overlay itself, so cp and exec agree (same path ensure_url_bridge
+    # relies on).
+    local stage="/home/$VM_USER/.devvm-mux.new"
+    smolvm machine cp "$bin" "$name:$stage"
     smolvm machine exec --name "$name" -- \
-        sh -c "install -m 0755 /tmp/devvm-mux.new $GUEST_MUX_PATH && rm -f /tmp/devvm-mux.new"
+        sh -c "install -m 0755 '$stage' $GUEST_MUX_PATH && rm -f '$stage'"
 }
 
 # Bring up a forward for HOST:GUEST. The host port is a *preference*: if it (or
