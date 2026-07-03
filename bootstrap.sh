@@ -504,6 +504,34 @@ main() {
         elif ask "Install smolvm for isolated development VMs?"; then
             run_sh 'curl -sSL https://smolmachines.com/install.sh | bash'
         fi
+
+        # devvm is a standalone Go app (github.com/smweber/devvm). Prefer the
+        # prebuilt release binary (no Go toolchain needed); each embeds the linux
+        # guest agents and is self-contained. Fall back to `go install` from
+        # source if the download fails.
+        step "Install devvm"
+        mkdir -p "$HOME/.local/bin"
+        devvm_os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        devvm_arch="$(uname -m)"
+        case "$devvm_arch" in
+            arm64 | aarch64) devvm_arch="arm64" ;;
+            x86_64 | amd64) devvm_arch="amd64" ;;
+        esac
+        devvm_asset="devvm-${devvm_os}-${devvm_arch}"
+        devvm_url="https://github.com/smweber/devvm/releases/latest/download/${devvm_asset}"
+        if run_sh "curl -fsSL -o '$HOME/.local/bin/devvm' '$devvm_url' && chmod +x '$HOME/.local/bin/devvm'"; then
+            info "Installed devvm ($devvm_asset) -> ~/.local/bin/devvm"
+        elif has go; then
+            warn "release download failed; building from source"
+            if run_sh "GOBIN='$HOME/.local/bin' go install github.com/smweber/devvm/cmd/devvm@latest"; then
+                info "Installed devvm via go install -> ~/.local/bin/devvm"
+            else
+                FAILED+=("install devvm")
+            fi
+        else
+            warn "could not download devvm and go is not installed; skipping"
+            warn "  install manually from $devvm_url"
+        fi
     else
         step "Install agent tools"
         check_agent_tool "Codex" has codex

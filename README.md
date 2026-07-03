@@ -47,7 +47,7 @@ devvm status                       # list every machine + state
 
 # ssh machines
 devvm exec scottdev3 hostname
-devvm tunnel scottdev3             # autossh port forwards (up/down/status)
+devvm tunnel scottdev3             # port forwards (up/down/status)
 devvm mosh scottdev3              # roaming shell, attached to the dev tmux session
 devvm vnc scottdev3
 devvm authorize-key scottdev3       # prompt for a GitHub user and key labels
@@ -57,10 +57,19 @@ devvm cleanup-keys scottdev3        # remove duplicates and the machine's own ke
 devvm lockdown scottdev3           # firewall + sshd hardening (opt-in)
 ```
 
-Per-machine config lives in `~/.config/devvm/machines/<name>.conf` (sourced
-bash; hand-editable). `create` writes one automatically; ssh hosts are added by
-dropping in a conf with `BACKEND=ssh` and `SSH_HOST=`. Repositories live only on
-the machine's disk; no host directories or SSH agent are mounted.
+`devvm` is a Go application in its own repo,
+[`github.com/smweber/devvm`](https://github.com/smweber/devvm); `bootstrap.sh`
+installs the prebuilt release binary for your OS/arch into `~/.local/bin` (no Go
+toolchain needed; it falls back to `go install …@latest`). Only the machine
+config under `devvm/` is part of this dotfiles repo. The guest side is one
+embedded `devvm-agent` binary the host installs on demand, so forwards, auth
+events, and key management ride a single per-machine exec (yamux for smol, a
+native ControlMaster for ssh) instead of the old per-connection processes.
+
+Per-machine config lives in `~/.config/devvm/machines/<name>.toml` (hand-editable
+TOML). `create` writes one automatically; ssh hosts are added by dropping in a
+file with `backend = "ssh"` and `ssh_host = "…"`. Repositories live only on the
+machine's disk; no host directories or SSH agent are mounted.
 
 For ssh/cloud machines, `authorized_keys` is seeded at bootstrap from
 `AUTHORIZED_KEYS_GITHUB` (GitHub `.keys`) / `AUTHORIZED_KEYS`, and managed later
@@ -72,26 +81,27 @@ password/root SSH login, and enables unattended security upgrades — fail-safe
 (`sshd -t` + reload, and it refuses to run without a working key in place).
 
 Authentication happens inside each machine. Because it has no browser,
-`devvm auth` points `$BROWSER` at a shim that streams login URLs back to the
-host, where they open in the host's default browser; tools that ignore
-`$BROWSER` simply print the URL in the terminal as before. `devvm auth NAME`
-with no tool logs in to all of github, codex, and claude in turn. Since the
-outbox is a machine→host channel, the watcher only opens plain `http(s)` URLs
-(no `file://`, custom schemes, or option injection). codex uses device auth when
-the installed CLI supports it. Older codex versions complete OAuth on a
-`127.0.0.1:1455` callback inside the machine, so only that fallback routes the
-host's `:1455` back in — a smol port mapping (one-time restart) or, for ssh, a
-transient `-L` on the login connection.
+`devvm auth` points `$BROWSER` at a shim that hands login URLs to the running
+agent, which pushes them to the host over its channel; the host opens them in
+the default browser (tools that ignore `$BROWSER` still print the URL). `devvm
+auth NAME` with no tool logs in to all of github, codex, and claude in turn.
+Because the URL crosses the guest→host boundary, only plain `http(s)` URLs are
+opened (no `file://`, custom schemes, or option injection). codex uses device
+auth when the installed CLI supports it; otherwise its `127.0.0.1:1455` callback
+is bridged as an ordinary forward — no VM restart. Tools that spin up a random
+callback port (e.g. Claude Code) get that port bridged the same way: the host
+binds it and pipes each connection to the guest over the agent channel.
+
 Creation prompts for memory with a host-aware default capped at 2 GiB; pass
 `--memory MiB` to skip the prompt. `devvm shell` attaches to a persistent tmux
-session. Subcommands, machine names, and auth tools tab-complete in fish.
+session. Subcommands, machine names, and auth tools tab-complete in fish and zsh.
 
-`devvm create` and `devvm bootstrap` copy the current host dotfiles checkout
-into the VM as an archive, including uncommitted changes. Host repository
-metadata and all other root-level hidden files/directories are excluded. After
-provisioning, the snapshot is attached to the host checkout's GitHub origin as
-a colocated Jujutsu/Git repository; use `jj git fetch` and `jj git push`.
-Host-only or unpublished changes remain visible as VM working-copy changes.
+Provisioning is pluggable per machine via the `provision` key: `url:<URL> [args]`
+(the default reproduces the old path — cloning `smweber/dotfiles` and running its
+`agent-vm` profile), `cmd:<path> [args]`, or `none`. This decouples `devvm` from
+`bootstrap.sh`, which is now just one provisioner. Repositories are cloned on the
+machine with `devvm repos` (from the conf's `repos` list) using the machine's own
+GitHub login.
 
 ### How it's organized
 

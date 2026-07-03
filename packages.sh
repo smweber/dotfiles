@@ -56,18 +56,14 @@ install_devvm_zsh_completion() {
     cat >>"$zshrc" <<'ZSH_COMPLETION'
 
 # >>> devvm zsh completion >>>
-if (( ! $+functions[compdef] )); then
-    autoload -Uz compinit
-    compinit
+# devvm (Go/cobra) generates its own zsh completion.
+if command -v devvm >/dev/null 2>&1; then
+    if (( ! $+functions[compdef] )); then
+        autoload -Uz compinit
+        compinit
+    fi
+    source <(devvm completion zsh)
 fi
-
-_devvm() {
-    local -a candidates
-    candidates=("${(@f)$(command devvm __complete-zsh "$CURRENT" "${words[@]}")}")
-    _describe 'devvm value' candidates
-}
-
-compdef _devvm devvm
 # <<< devvm zsh completion <<<
 ZSH_COMPLETION
 }

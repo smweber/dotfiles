@@ -1,0 +1,8 @@
+# devvm machine config for 'scottdev3' (tool-managed; edit freely)
+
+backend = "ssh"
+unmanaged = true
+ssh_host = "scottdev3"
+ports = ["3000", "3001", "3002", "3003", "3004", "3005", "3006", "3007", "3008", "3009", "3010", "5901", "8080", "9222"]
+vnc_port = 5901
+mosh_server = "/home/linuxbrew/.linuxbrew/bin/mosh-server"
