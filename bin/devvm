@@ -23,8 +23,8 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/devvm"
 MACHINES_DIR="$CONFIG_DIR/machines"
 KNOWN_HOSTS="$CONFIG_DIR/known_hosts"
 
-# Absolute path to this script, so smol port forwards can re-invoke us from a
-# socat EXEC child (which execvp's the program, without our shell context).
+# Absolute path to this script; smol forwards resolve the repo from here to
+# locate the prebuilt devvm-mux binaries (see mux_dist_dir).
 SELF="${BASH_SOURCE[0]}"
 case "$SELF" in
     /*) ;;
@@ -281,7 +281,7 @@ smol_shell() {
 }
 
 # Forwards follow the VM: resume configured ones on start, reap them on stop so
-# dead socat listeners don't squat host ports or misreport in status.
+# dead mux daemons don't squat host ports or misreport in status.
 smol_start() {
     need_smolvm
     smolvm machine start --name "$1"
@@ -312,14 +312,20 @@ smol_status() {
     fi
 }
 
-# --- smol dynamic port forwards (socat over the exec channel) ---------------
+# --- smol dynamic port forwards (yamux over one exec channel) ---------------
 #
 # smolvm only changes its NAT mappings while stopped, so instead of a real
-# mapping (and a restart) we splice a host-side TCP listener to the guest's
-# port over the already-authenticated `machine exec` channel: no restart, no
-# ssh keys. One socat listener per forwarded host port; each connection forks
-# an exec whose guest end is a dependency-free bash /dev/tcp bridge (the hidden
-# `__fwd-exec` subcommand). The host needs socat; the guest needs nothing.
+# mapping (and a restart) we forward over the already-authenticated `machine
+# exec` channel: no restart, no ssh keys. smol guests have no host-routable
+# network, so exec's stdio is the only host<->guest path.
+#
+# One host-side daemon (devvm-mux, a small Go binary) per forwarded port owns a
+# SINGLE long-lived `machine exec` running `devvm-mux serve` in the guest and
+# multiplexes every connection over it with yamux. This replaced an earlier
+# socat-per-connection bridge: opening one exec per connection tripped smolvm's
+# poor concurrency across separate exec sessions, so a browser's parallel
+# requests wedged. A prebuilt guest binary is copied in on demand; nothing is
+# built or installed inside the guest at runtime.
 smol_fwd_dir()     { printf '%s/forwards/%s' "$CONFIG_DIR" "$1"; }
 # Runtime state is keyed by GUEST port (the stable identity of the service);
 # the actual host port it landed on is recorded inside the file.
@@ -363,11 +369,82 @@ smol_forward_running() {   # NAME GUEST
 # report the actual one. The guest port is the stable handle, so the service is
 # reachable regardless of which host port it landed on. Returns non-zero only if
 # the whole range is busy.
+# Where the forward runs devvm-mux inside the guest (root-owned, on PATH).
+GUEST_MUX_PATH="/usr/local/bin/devvm-mux"
+
+# Directory of prebuilt devvm-mux binaries, resolved relative to this script's
+# real location so it works whether bin/devvm is on PATH directly or stowed as
+# a symlink. Override with DEVVM_MUX_DIR.
+mux_dist_dir() {
+    if [[ -n "${DEVVM_MUX_DIR:-}" ]]; then printf '%s' "$DEVVM_MUX_DIR"; return; fi
+    local real="$SELF" t
+    while [[ -L "$real" ]]; do
+        t="$(readlink "$real")"
+        case "$t" in
+            /*) real="$t" ;;
+            *)  real="$(cd "$(dirname "$real")" && pwd)/$t" ;;
+        esac
+    done
+    printf '%s/devvm/mux/dist' "$(cd "$(dirname "$real")/.." && pwd)"
+}
+
+# GOOS_GOARCH tag for a uname os/machine pair (or empty if unsupported).
+mux_platform_tag() {           # UNAME_S UNAME_M
+    local os arch
+    case "$1" in Darwin) os=darwin ;; Linux) os=linux ;; *) return 1 ;; esac
+    case "$2" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=amd64 ;; *) return 1 ;; esac
+    printf '%s_%s' "$os" "$arch"
+}
+
+mux_bin_for() {                # TAG
+    printf '%s/%s/devvm-mux' "$(mux_dist_dir)" "$1"
+}
+
+# Path to the host's devvm-mux, or die with a build hint if it's missing.
+mux_host_bin() {
+    local tag bin
+    tag="$(mux_platform_tag "$(uname -s)" "$(uname -m)")" ||
+        die "no devvm-mux build for this host ($(uname -s)/$(uname -m))"
+    bin="$(mux_bin_for "$tag")"
+    [[ -x "$bin" ]] ||
+        die "devvm-mux host binary missing: $bin (rebuild from $(mux_dist_dir)/..)"
+    printf '%s' "$bin"
+}
+
+sha256_of() {                  # FILE  (host side; macOS has shasum, Linux sha256sum)
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+    else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+# Copy the right-arch devvm-mux into the guest (idempotent: skips when the guest
+# already has this exact build). Runs as root via a direct `machine exec`.
+smol_ensure_mux_guest() {      # NAME
+    local name="$1" garch tag bin sum guest_sum
+    garch="$(smolvm machine exec --name "$name" -- uname -m 2>/dev/null | tr -d '[:space:]')"
+    tag="$(mux_platform_tag Linux "$garch")" ||
+        die "unsupported guest arch '$garch' for devvm-mux"
+    bin="$(mux_bin_for "$tag")"
+    [[ -x "$bin" ]] || die "devvm-mux guest binary missing: $bin"
+    sum="$(sha256_of "$bin")"
+    guest_sum="$(smolvm machine exec --name "$name" -- \
+        sh -c "sha256sum $GUEST_MUX_PATH 2>/dev/null | cut -d' ' -f1" 2>/dev/null |
+        tr -d '[:space:]')"
+    [[ -n "$sum" && "$sum" == "$guest_sum" ]] && return 0
+    echo "devvm: installing devvm-mux ($tag) into '$name'..." >&2
+    smolvm machine cp "$bin" "$name:/tmp/devvm-mux.new"
+    smolvm machine exec --name "$name" -- \
+        sh -c "install -m 0755 /tmp/devvm-mux.new $GUEST_MUX_PATH && rm -f /tmp/devvm-mux.new"
+}
+
+# Bring up a forward for HOST:GUEST. The host port is a *preference*: if it (or
+# any port up to +20) is taken, we bump upward to the first that binds and
+# report the actual one. The guest port is the stable handle, so the service is
+# reachable regardless of which host port it landed on. Returns non-zero only if
+# the whole range is busy.
 smol_forward_up() {        # NAME HOST:GUEST
-    need_cmd socat
     local name="$1"
     split_port "$2"
-    local pref="$FWD_H" g="$FWD_G" dir pf log pid h tries=0
+    local pref="$FWD_H" g="$FWD_G" dir pf log pid h tries=0 hostbin
     if smol_forward_running "$name" "$g"; then
         smol_fwd_read "$name" "$g" || true
         echo "devvm: $name:$g already forwarded on localhost:$FWD_HOST"
@@ -375,6 +452,8 @@ smol_forward_up() {        # NAME HOST:GUEST
     fi
     [[ "$pref" =~ ^[0-9]+$ && "$g" =~ ^[0-9]+$ ]] ||
         { echo "devvm: '$2' must be numeric HOST:GUEST ports" >&2; return 1; }
+    hostbin="$(mux_host_bin)"
+    smol_ensure_mux_guest "$name" || return 1
     dir="$(smol_fwd_dir "$name")"; mkdir -p "$dir"
     pf="$dir/g$g.pid"; log="$dir/g$g.log"
     h="$pref"
@@ -383,13 +462,15 @@ smol_forward_up() {        # NAME HOST:GUEST
         if [[ -n "$(forward_port_owner "$h" || true)" ]]; then
             h=$((h + 1)); tries=$((tries + 1)); continue
         fi
-        # Re-invoking $SELF (rather than an inline command) keeps the guest side
-        # free of the commas/quotes socat's EXEC address parsing would choke on.
-        nohup socat "TCP-LISTEN:$h,fork,reuseaddr,bind=127.0.0.1" \
-            "EXEC:$SELF __fwd-exec $name $g" </dev/null >"$log" 2>&1 &
+        # The mux daemon binds the host port and owns the single guest exec that
+        # runs `devvm-mux serve`; it exits at once if the port is already taken.
+        nohup "$hostbin" listen --addr "127.0.0.1:$h" -- \
+            smolvm machine exec -i --stream --name "$name" -- \
+            "$GUEST_MUX_PATH" serve --target "127.0.0.1:$g" \
+            </dev/null >"$log" 2>&1 &
         pid=$!
         disown "$pid" 2>/dev/null || true
-        sleep 0.3
+        sleep 0.4
         if kill -0 "$pid" 2>/dev/null; then
             printf '%s %s\n' "$h" "$pid" >"$pf"
             if [[ "$h" == "$pref" ]]; then
@@ -399,7 +480,7 @@ smol_forward_up() {        # NAME HOST:GUEST
             fi
             return 0
         fi
-        # socat exited at once: a non-devvm listener holds $h; try the next.
+        # Daemon exited at once: a non-devvm listener holds $h; try the next.
         h=$((h + 1)); tries=$((tries + 1))
     done
     echo "devvm: no free host port for $name:$g in range $pref-$((h - 1))" >&2
@@ -409,8 +490,8 @@ smol_forward_up() {        # NAME HOST:GUEST
 smol_forward_down() {      # NAME GUEST
     local pf host pid; pf="$(smol_fwd_pidfile "$1" "$2")"
     if read -r host pid <"$pf" 2>/dev/null && [[ -n "$pid" ]]; then
-        pkill -P "$pid" 2>/dev/null || true   # reap socat's per-connection children
-        kill "$pid" 2>/dev/null || true
+        kill "$pid" 2>/dev/null || true       # mux daemon; its SIGTERM handler
+        pkill -P "$pid" 2>/dev/null || true   # kills the guest exec, reap as backup
     fi
     rm -f "$pf"
 }
@@ -1919,37 +2000,6 @@ main() {
             (($# >= 2)) || die "usage: devvm __complete-zsh CURRENT WORD..."
             complete_zsh "$@"
             return
-            ;;
-        __fwd-exec)
-            # Guest end of a smol forward, run once per connection by socat.
-            # Splices this process's stdio (the host socket) to the guest's
-            # port over `machine exec`, using a dependency-free bash /dev/tcp
-            # bridge so the guest needs nothing installed.
-            #
-            # -i keeps stdin open and forwards it (the inbound request bytes);
-            # --stream returns the guest's output as it arrives. Both are
-            # required for a full-duplex bridge -- with --stream alone the guest
-            # never receives the request and every connection hangs. No -t: a
-            # PTY would corrupt the binary stream with CR/LF translation.
-            #
-            # Bridge structure matters. The RESPONSE relay (socket -> stdout)
-            # must be the foreground command so the exec lives until the guest
-            # closes the connection; backgrounding it instead lets bash tear it
-            # down as soon as the writer's stdin EOFs, truncating the reply. The
-            # backgrounded REQUEST relay needs an explicit `<&0`, or bash's
-            # async-command default reassigns its stdin to /dev/null and no
-            # request bytes ever reach the guest.
-            shift
-            [[ $# -eq 2 ]] || die "usage: devvm __fwd-exec NAME GUESTPORT"
-            valid_name "$1"
-            [[ "$2" =~ ^[0-9]+$ ]] || die "guest port must be numeric"
-            need_smolvm
-            exec smolvm machine exec -i --stream --name "$1" -- bash -c '
-                exec 3<>"/dev/tcp/127.0.0.1/$0" || exit 1
-                cat <&0 >&3 &      # host request bytes -> guest port
-                cat <&3            # guest response bytes -> host (foreground)
-                kill $! 2>/dev/null
-            ' "$2"
             ;;
         -h|--help|help|"")
             usage
