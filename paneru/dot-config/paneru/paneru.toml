@@ -28,7 +28,7 @@ animation_speed = 20
 # last window. Set to false to always keep the current window on screen and
 # fully exposed. Enabled by default.
 continuous = false
-deceleration = 10.0
+#deceleration = 10.0
 
 [swipe.gesture]
 # How many fingers to use for moving windows left and right.
