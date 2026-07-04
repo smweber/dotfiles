@@ -519,7 +519,11 @@ main() {
         esac
         devvm_asset="devvm-${devvm_os}-${devvm_arch}"
         devvm_url="https://github.com/smweber/devvm/releases/latest/download/${devvm_asset}"
-        if run_sh "curl -fsSL -o '$HOME/.local/bin/devvm' '$devvm_url' && chmod +x '$HOME/.local/bin/devvm'"; then
+        # Download to a temp file and atomically mv into place: a rename swaps
+        # the inode, so it succeeds even if the old devvm is currently running
+        # (writing over it in place fails with ETXTBSY -> curl error 23), and
+        # never leaves a truncated binary if the download aborts midway.
+        if run_sh "curl -fsSL -o '$HOME/.local/bin/devvm.tmp' '$devvm_url' && chmod +x '$HOME/.local/bin/devvm.tmp' && mv -f '$HOME/.local/bin/devvm.tmp' '$HOME/.local/bin/devvm'"; then
             info "Installed devvm ($devvm_asset) -> ~/.local/bin/devvm"
         elif has go; then
             warn "release download failed; building from source"
