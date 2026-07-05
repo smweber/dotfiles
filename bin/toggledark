@@ -2,6 +2,27 @@
 # Toggle dark and light themes for tmux, Alacritty, and Neovim on macOS and Linux.
 # On Linux with a graphical session (Cinnamon/GNOME), also switches the desktop theme.
 # On headless Linux, tracks state in a file.
+#
+# Usage: toggledark [light|dark|toggle]
+#   no argument / toggle  flip to the opposite of the current mode
+#   light | dark          set that mode explicitly
+#
+# When devvm (github.com/smweber/devvm) is installed, the chosen mode is also
+# pushed into every running local dev VM that has its own toggledark.
+
+case "${1:-toggle}" in
+  toggle) MODE="toggle" ;;
+  light)  MODE="light" ;;
+  dark)   MODE="dark" ;;
+  -h | --help)
+    echo "usage: toggledark [light|dark|toggle]"
+    exit 0
+    ;;
+  *)
+    echo "toggledark: unknown mode '$1' (want light, dark, or toggle)" >&2
+    exit 1
+    ;;
+esac
 
 ALACRITTY_LIGHTTHEME="catppuccin_latte.toml"
 ALACRITTY_DARKTHEME="catppuccin.toml"
@@ -25,8 +46,14 @@ HAS_DISPLAY=false
 
 # --- OS/desktop theme switching ---
 
+# Set macOS appearance explicitly ($1 is "dark" or "light") so re-selecting the
+# current mode is a no-op rather than a flip.
 switch_macos_theme() {
-  osascript -e 'tell app "System Events" to tell appearance preferences to set dark mode to not dark mode'
+  if [ "$1" = "dark" ]; then
+    osascript -e 'tell app "System Events" to tell appearance preferences to set dark mode to true'
+  else
+    osascript -e 'tell app "System Events" to tell appearance preferences to set dark mode to false'
+  fi
 }
 
 switch_linux_desktop_dark() {
@@ -77,12 +104,20 @@ else
   IS_DARK=$(cat "$THEME_MODE_FILE" 2>/dev/null || echo "false")
 fi
 
-# --- Toggle ---
+# --- Resolve the target mode ---
+# In toggle mode, flip the detected mode; otherwise honour the explicit request.
+if [ "$MODE" = "toggle" ]; then
+  [ "$IS_DARK" = "true" ] && TARGET="light" || TARGET="dark"
+else
+  TARGET="$MODE"
+fi
 
-if [ "$IS_DARK" = "true" ]; then
+# --- Apply ---
+
+if [ "$TARGET" = "light" ]; then
   # Switch to light
   if [ "$OS_TYPE" = "Darwin" ]; then
-    switch_macos_theme
+    switch_macos_theme light
   elif [ "$HAS_DISPLAY" = true ]; then
     switch_linux_desktop_light
   fi
@@ -94,7 +129,7 @@ if [ "$IS_DARK" = "true" ]; then
 else
   # Switch to dark
   if [ "$OS_TYPE" = "Darwin" ]; then
-    switch_macos_theme
+    switch_macos_theme dark
   elif [ "$HAS_DISPLAY" = true ]; then
     switch_linux_desktop_dark
   fi
@@ -116,4 +151,24 @@ if tmux info >/dev/null 2>&1; then
   echo "source-file $REAL_TMUXCONF" >> "$reload"
   tmux source-file "$reload"
   rm -f "$reload"
+fi
+
+# --- Propagate to running local dev VMs (devvm) ---
+# For each running smol machine that has its own toggledark, set the SAME mode
+# explicitly (never toggle - that could desync a VM from the host). `devvm
+# status --plain` prints one `name<TAB>backend<TAB>state` row per machine.
+# devvm is a host-only CLI, so inside a VM this loop finds nothing and stops -
+# no recursion.
+if command -v devvm >/dev/null 2>&1; then
+  devvm status --plain 2>/dev/null |
+    awk -F '\t' '$2 == "smol" && $3 == "running" { print $1 }' |
+    while IFS= read -r vm; do
+      [ -n "$vm" ] || continue
+      # One guest exec: check for toggledark, and set the mode if present. $0 is
+      # the VM name (for the message), $1 the target mode.
+      devvm exec "$vm" sh -c '
+        command -v toggledark >/dev/null 2>&1 || exit 0
+        toggledark "$1" && echo "toggledark: set $1 mode on devvm '\''$0'\''"
+      ' "$vm" "$TARGET" 2>/dev/null || true
+    done
 fi
