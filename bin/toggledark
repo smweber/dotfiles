@@ -41,6 +41,19 @@ OS_TYPE=$(uname)
 HAS_DISPLAY=false
 [ -n "$DISPLAY" ] || [ -n "$WAYLAND_DISPLAY" ] && HAS_DISPLAY=true
 
+# Pick which tmux server to drive for the live repaint. Inside tmux, use that
+# session's own socket. Otherwise, when run non-interactively inside a devvm
+# guest (e.g. `devvm exec NAME toggledark dark` from the host), the persistent
+# dev session lives on devvm's private socket, not tmux's default - target it so
+# running panes actually repaint instead of silently doing nothing.
+if [ -n "$TMUX" ]; then
+  TMUX_CMD="tmux -S ${TMUX%%,*}"
+elif [ -S "$HOME/.devvm/tmux.sock" ]; then
+  TMUX_CMD="tmux -S $HOME/.devvm/tmux.sock"
+else
+  TMUX_CMD="tmux"
+fi
+
 # --- OS/desktop theme switching ---
 
 # Set macOS appearance explicitly ($1 is "dark" or "light") so re-selecting the
@@ -72,10 +85,10 @@ switch_linux_desktop_light() {
 # --- Shared helpers ---
 
 switch_vim_theme() {
-  tmux list-panes -a -F '#{pane_id} #{pane_current_command}' |
+  $TMUX_CMD list-panes -a -F '#{pane_id} #{pane_current_command}' |
     grep -E 'nvim|vim' |
     cut -d ' ' -f 1 |
-    xargs -I PANE tmux send-keys -t PANE Escape \
+    xargs -I PANE $TMUX_CMD send-keys -t PANE Escape \
       ":set background=$1" Enter
 }
 
@@ -138,11 +151,11 @@ fi
 # Do it as ONE batched `source-file` (unset every catppuccin option, then load
 # the theme) so tmux repaints once - not once per option, which made the bar
 # rebuild slowly, element by element.
-if tmux info >/dev/null 2>&1; then
+if $TMUX_CMD info >/dev/null 2>&1; then
   reload=$(mktemp)
-  tmux show-options -g 2>/dev/null | grep -oE '^@(thm_|_ctp|catppuccin_)[a-zA-Z0-9_]*' | sed 's/^/set -gu /' > "$reload"
+  $TMUX_CMD show-options -g 2>/dev/null | grep -oE '^@(thm_|_ctp|catppuccin_)[a-zA-Z0-9_]*' | sed 's/^/set -gu /' > "$reload"
   echo "source-file $REAL_TMUXCONF" >> "$reload"
-  tmux source-file "$reload"
+  $TMUX_CMD source-file "$reload"
   rm -f "$reload"
 fi
 
