@@ -27,17 +27,14 @@ esac
 ALACRITTY_LIGHTTHEME="catppuccin_latte.toml"
 ALACRITTY_DARKTHEME="catppuccin.toml"
 
-TMUX_LIGHTTHEME="@catppuccin_flavor 'latte'"
-TMUX_DARKTHEME="@catppuccin_flavor 'frappe'"
-
-VIMCONF="${XDG_CONFIG_HOME:-$HOME/.config}/nvim/init.lua"
 ALACRITTYCONF="$HOME/.alacritty.toml"
 TMUXCONF="$HOME/.tmux-catppuccin.conf" # standalone theme file (see dot-tmux.conf)
 THEME_MODE_FILE="$HOME/.theme_mode"
 
-# Get the actual files (follow symlinks)
+# nvim and tmux read the mode from THEME_MODE_FILE themselves (see init.lua and
+# dot-tmux-catppuccin.conf), so we only write that file and reload them - we
+# never rewrite their tracked configs. Alacritty still needs an in-place edit.
 REAL_ALACRITTYCONF=$(readlink -f "$ALACRITTYCONF" 2>/dev/null || echo "$ALACRITTYCONF")
-REAL_VIMCONF=$(readlink -f "$VIMCONF" 2>/dev/null || echo "$VIMCONF")
 REAL_TMUXCONF=$(readlink -f "$TMUXCONF" 2>/dev/null || echo "$TMUXCONF")
 
 OS_TYPE=$(uname)
@@ -123,8 +120,6 @@ if [ "$TARGET" = "light" ]; then
   fi
   echo "false" > "$THEME_MODE_FILE"
   [ -f "$REAL_ALACRITTYCONF" ] && update_sed "s/${ALACRITTY_DARKTHEME}/${ALACRITTY_LIGHTTHEME}/" "$REAL_ALACRITTYCONF"
-  update_sed "s/${TMUX_DARKTHEME}/${TMUX_LIGHTTHEME}/" "$REAL_TMUXCONF"
-  update_sed "s/vim.opt.background = 'dark'/vim.opt.background = 'light'/" "$REAL_VIMCONF"
   switch_vim_theme "light"
 else
   # Switch to dark
@@ -135,8 +130,6 @@ else
   fi
   echo "true" > "$THEME_MODE_FILE"
   [ -f "$REAL_ALACRITTYCONF" ] && update_sed "s/${ALACRITTY_LIGHTTHEME}/${ALACRITTY_DARKTHEME}/" "$REAL_ALACRITTYCONF"
-  update_sed "s/${TMUX_LIGHTTHEME}/${TMUX_DARKTHEME}/" "$REAL_TMUXCONF"
-  update_sed "s/vim.opt.background = 'light'/vim.opt.background = 'dark'/" "$REAL_VIMCONF"
   switch_vim_theme "dark"
 fi
 

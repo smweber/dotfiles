@@ -6,8 +6,11 @@ vim.g.mapleader = ' '
 require('lazy-bootstrap')
 require('lazy').setup('plugins')
 
--- Set colorscheme after plugins are loaded
-vim.opt.background = 'dark'
+-- Set colorscheme after plugins are loaded. Follow the light/dark mode
+-- `toggledark` records in ~/.theme_mode ('true' = dark); default dark when the
+-- file is absent or unreadable, so nvim never rewrites this tracked file.
+local ok, theme = pcall(vim.fn.readfile, vim.fn.expand('~/.theme_mode'))
+vim.opt.background = (ok and theme[1] == 'false') and 'light' or 'dark'
 vim.cmd('colorscheme catppuccin')
 
 -- Load user preferences first
