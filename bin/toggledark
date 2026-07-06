@@ -165,15 +165,16 @@ if $TMUX_CMD info >/dev/null 2>&1; then
   $TMUX_CMD "$@" source-file "$REAL_TMUXCONF"
 fi
 
-# --- Propagate to running local dev VMs (devvm) ---
-# For each running smol machine that has its own toggledark, set the SAME mode
+# --- Propagate to live dev VMs (devvm) ---
+# For each reachable machine that has its own toggledark, set the SAME mode
 # explicitly (never toggle - that could desync a VM from the host). `devvm
-# status --plain` prints one `name<TAB>backend<TAB>state` row per machine.
-# devvm is a host-only CLI, so inside a VM this loop finds nothing and stops -
-# no recursion.
+# status --plain` prints one `name<TAB>backend<TAB>state` row per machine; a live
+# machine is a running smol VM or a reachable remote host (dormant/stopped are
+# skipped). devvm is a host-only CLI, so inside a VM this loop finds nothing and
+# stops - no recursion.
 if command -v devvm >/dev/null 2>&1; then
   devvm status --plain 2>/dev/null |
-    awk -F '\t' '$2 == "smol" && $3 == "running" { print $1 }' |
+    awk -F '\t' '$3 == "running" || $3 == "reachable" { print $1 }' |
     while IFS= read -r vm; do
       [ -n "$vm" ] || continue
       # One guest exec: check for toggledark, and set the mode if present. $0 is
