@@ -28,9 +28,9 @@ ALACRITTY_LIGHTTHEME="catppuccin_latte.toml"
 ALACRITTY_DARKTHEME="catppuccin.toml"
 ALACRITTY_THEMES="$HOME/.config/alacritty/themes/themes"
 # Untracked override imported by ~/.alacritty.toml (see dot-alacritty.toml). We
-# copy the chosen theme here instead of editing the tracked config; Alacritty's
-# live_config_reload picks up the change.
+# copy the chosen theme here instead of editing the tracked config.
 ALACRITTY_ACTIVE="$HOME/.alacritty-theme.toml"
+ALACRITTY_CONF="$HOME/.alacritty.toml" # primary config; touched to force reload
 
 TMUXCONF="$HOME/.tmux-catppuccin.conf" # standalone theme file (see dot-tmux.conf)
 THEME_MODE_FILE="$HOME/.theme_mode"
@@ -96,10 +96,17 @@ switch_vim_theme() {
 }
 
 # Point the alacritty override at $1's theme file by copying it over
-# ALACRITTY_ACTIVE; live_config_reload repaints running windows. No-op if the
-# theme file is absent (e.g. alacritty not installed, or in a headless guest).
+# ALACRITTY_ACTIVE. No-op if the theme file is absent (e.g. alacritty not
+# installed, or in a headless guest).
+#
+# Then bump the primary config's mtime: Alacritty's live reload only watches the
+# files that existed when it started, so a freshly created/changed override
+# import can be missed. Touching the primary (content unchanged, so the tracked
+# file stays clean in git) forces a full re-read that picks up the override.
 switch_alacritty_theme() {
-  [ -f "$ALACRITTY_THEMES/$1" ] && cp "$ALACRITTY_THEMES/$1" "$ALACRITTY_ACTIVE"
+  [ -f "$ALACRITTY_THEMES/$1" ] || return 0
+  cp "$ALACRITTY_THEMES/$1" "$ALACRITTY_ACTIVE"
+  [ -e "$ALACRITTY_CONF" ] && touch "$ALACRITTY_CONF"
 }
 
 # --- Detect current mode ---
