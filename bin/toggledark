@@ -26,15 +26,18 @@ esac
 
 ALACRITTY_LIGHTTHEME="catppuccin_latte.toml"
 ALACRITTY_DARKTHEME="catppuccin.toml"
+ALACRITTY_THEMES="$HOME/.config/alacritty/themes/themes"
+# Untracked override imported by ~/.alacritty.toml (see dot-alacritty.toml). We
+# copy the chosen theme here instead of editing the tracked config; Alacritty's
+# live_config_reload picks up the change.
+ALACRITTY_ACTIVE="$HOME/.alacritty-theme.toml"
 
-ALACRITTYCONF="$HOME/.alacritty.toml"
 TMUXCONF="$HOME/.tmux-catppuccin.conf" # standalone theme file (see dot-tmux.conf)
 THEME_MODE_FILE="$HOME/.theme_mode"
 
 # nvim and tmux read the mode from THEME_MODE_FILE themselves (see init.lua and
-# dot-tmux-catppuccin.conf), so we only write that file and reload them - we
-# never rewrite their tracked configs. Alacritty still needs an in-place edit.
-REAL_ALACRITTYCONF=$(readlink -f "$ALACRITTYCONF" 2>/dev/null || echo "$ALACRITTYCONF")
+# dot-tmux-catppuccin.conf); alacritty imports ALACRITTY_ACTIVE. So we only write
+# state/override files and reload - we never rewrite a tracked config.
 REAL_TMUXCONF=$(readlink -f "$TMUXCONF" 2>/dev/null || echo "$TMUXCONF")
 
 OS_TYPE=$(uname)
@@ -92,12 +95,11 @@ switch_vim_theme() {
       ":set background=$1" Enter
 }
 
-update_sed() {
-  if [ "$OS_TYPE" = "Darwin" ]; then
-    sed -i '' "$@"
-  else
-    sed -i "$@"
-  fi
+# Point the alacritty override at $1's theme file by copying it over
+# ALACRITTY_ACTIVE; live_config_reload repaints running windows. No-op if the
+# theme file is absent (e.g. alacritty not installed, or in a headless guest).
+switch_alacritty_theme() {
+  [ -f "$ALACRITTY_THEMES/$1" ] && cp "$ALACRITTY_THEMES/$1" "$ALACRITTY_ACTIVE"
 }
 
 # --- Detect current mode ---
@@ -132,7 +134,7 @@ if [ "$TARGET" = "light" ]; then
     switch_linux_desktop_light
   fi
   echo "false" > "$THEME_MODE_FILE"
-  [ -f "$REAL_ALACRITTYCONF" ] && update_sed "s/${ALACRITTY_DARKTHEME}/${ALACRITTY_LIGHTTHEME}/" "$REAL_ALACRITTYCONF"
+  switch_alacritty_theme "$ALACRITTY_LIGHTTHEME"
   switch_vim_theme "light"
 else
   # Switch to dark
@@ -142,21 +144,25 @@ else
     switch_linux_desktop_dark
   fi
   echo "true" > "$THEME_MODE_FILE"
-  [ -f "$REAL_ALACRITTYCONF" ] && update_sed "s/${ALACRITTY_LIGHTTHEME}/${ALACRITTY_DARKTHEME}/" "$REAL_ALACRITTYCONF"
+  switch_alacritty_theme "$ALACRITTY_DARKTHEME"
   switch_vim_theme "dark"
 fi
 
 # Reload the tmux theme. catppuccin v2 bakes its palette/colors with `set -ogq`
-# (only-if-unset), so switching flavor requires clearing its options first.
-# Do it as ONE batched `source-file` (unset every catppuccin option, then load
-# the theme) so tmux repaints once - not once per option, which made the bar
-# rebuild slowly, element by element.
+# (only-if-unset), so switching flavor requires clearing its options first, then
+# re-sourcing. Pass every unset plus the source as ONE tmux invocation
+# (';'-separated) so the bar repaints once, not once per option.
+#
+# Inline commands, NOT a temp file sourced by path: under `devvm exec` the
+# guest's /tmp can be a private per-exec mount the tmux server can't read, so a
+# source-file'd temp silently did nothing (send-keys, used for nvim above, was
+# unaffected - which is why nvim switched live but tmux didn't).
 if $TMUX_CMD info >/dev/null 2>&1; then
-  reload=$(mktemp)
-  $TMUX_CMD show-options -g 2>/dev/null | grep -oE '^@(thm_|_ctp|catppuccin_)[a-zA-Z0-9_]*' | sed 's/^/set -gu /' > "$reload"
-  echo "source-file $REAL_TMUXCONF" >> "$reload"
-  $TMUX_CMD source-file "$reload"
-  rm -f "$reload"
+  set --
+  for opt in $($TMUX_CMD show-options -g 2>/dev/null | grep -oE '^@(thm_|_ctp|catppuccin_)[a-zA-Z0-9_]*'); do
+    set -- "$@" set -gu "$opt" ";"
+  done
+  $TMUX_CMD "$@" source-file "$REAL_TMUXCONF"
 fi
 
 # --- Propagate to running local dev VMs (devvm) ---
