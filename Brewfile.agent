@@ -2,4 +2,4 @@
 # Both casks provide native Linux binaries, so Node.js is not required.
 
 cask "codex"
-cask "claude-code"
+cask "claude-code@latest"
