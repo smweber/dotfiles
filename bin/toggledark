@@ -8,7 +8,9 @@
 #   light | dark          set that mode explicitly
 #
 # When devvm (github.com/smweber/devvm) is installed, the chosen mode is also
-# pushed into every running local dev VM that has its own toggledark.
+# pushed into every live dev machine it knows about (local smol VMs and remote
+# hosts alike) that has its own toggledark. Set TOGGLEDARK_NO_PROPAGATE=1 to
+# skip that.
 
 case "${1:-toggle}" in
   toggle) MODE="toggle" ;;
@@ -172,23 +174,55 @@ if $TMUX_CMD info >/dev/null 2>&1; then
   $TMUX_CMD "$@" source-file "$REAL_TMUXCONF"
 fi
 
-# --- Propagate to live dev VMs (devvm) ---
-# For each reachable machine that has its own toggledark, set the SAME mode
-# explicitly (never toggle - that could desync a VM from the host). `devvm
-# status --plain` prints one `name<TAB>backend<TAB>state` row per machine; a live
-# machine is a running smol VM or a reachable remote host (dormant/stopped are
-# skipped). devvm is a host-only CLI, so inside a VM this loop finds nothing and
-# stops - no recursion.
-if command -v devvm >/dev/null 2>&1; then
-  devvm status --plain 2>/dev/null |
-    awk -F '\t' '$3 == "running" || $3 == "reachable" { print $1 }' |
-    while IFS= read -r vm; do
-      [ -n "$vm" ] || continue
-      # One guest exec: check for toggledark, and set the mode if present. $0 is
-      # the VM name (for the message), $1 the target mode.
-      devvm exec "$vm" sh -c '
-        command -v toggledark >/dev/null 2>&1 || exit 0
-        toggledark "$1" && echo "toggledark: set $1 mode on devvm '\''$0'\''"
-      ' "$vm" "$TARGET" 2>/dev/null || true
-    done
+# --- Propagate to live dev machines (devvm) ---
+# For each live machine devvm knows about that has its own toggledark, set the
+# SAME mode explicitly (never toggle - that could desync a machine from here).
+#
+# `devvm status --plain --local` prints one `name<TAB>backend<TAB>state` row per
+# machine this host owns, without dialing any hub. A live machine is a running
+# smol VM or a reachable remote host (dormant/stopped/unreachable are skipped).
+# Hub-hosted machines (HUB/NAME) are deliberately NOT exec'd from here: the hub
+# host has devvm too, so its own toggledark fans out to them when we reach it as
+# a plain machine (register the hub host as a remote machine as well). That is
+# also why this recurses rather than stopping at one hop - TOGGLEDARK_HOP caps
+# the depth so a cycle of mutually registered hosts cannot loop forever.
+#
+# `devvm exec` is just ssh / `smolvm exec` with the machine's conf (host, port,
+# key, known_hosts) applied, so we use it rather than reimplementing that here.
+# Machines are contacted in parallel - a slow or half-dead ssh host otherwise
+# holds up the toggle for everything after it - and each attempt is bounded.
+TOGGLEDARK_HOP=${TOGGLEDARK_HOP:-0}
+# devvm installs to ~/.local/bin (or a brew prefix), which a shortcut/launcher
+# shell may not have on PATH - look there too rather than silently not fanning out.
+PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"
+if [ -z "$TOGGLEDARK_NO_PROPAGATE" ] && [ "$TOGGLEDARK_HOP" -lt 3 ] &&
+  command -v devvm >/dev/null 2>&1; then
+  # --local (devvm >= v0.1.13) skips the hub dial; older devvm gets the full listing.
+  rows=$(devvm status --plain --local 2>/dev/null || devvm status --plain 2>/dev/null) ||
+    echo "toggledark: 'devvm status --plain' failed, not propagating" >&2
+  machines=$(printf '%s\n' "$rows" |
+    awk -F '\t' '$2 != "hub" && ($3 == "running" || $3 == "reachable") { print $1 }')
+
+  # Bound each machine: ssh's own connect timeout (devvm honours this env var),
+  # plus a wall-clock cap when `timeout` exists (coreutils; absent on stock
+  # macOS) for a host that connects but then stalls in its login shell.
+  export DEVVM_SSH_CONNECT_TIMEOUT=${DEVVM_SSH_CONNECT_TIMEOUT:-5}
+  BOUND=""
+  command -v timeout >/dev/null 2>&1 && BOUND="timeout 30"
+
+  for vm in $machines; do
+    # One guest exec: check for toggledark, set the mode if present, and say
+    # so. $0 is the machine name (for the message), $1 the target mode, $2 the
+    # hop count for the guest's own fan-out. Anything the guest prints on
+    # stderr is noise from a half-working host, so only our own lines show.
+    (
+      if $BOUND devvm exec "$vm" sh -c '
+          command -v toggledark >/dev/null 2>&1 || { echo "toggledark: devvm '\''$0'\'' has no toggledark, skipped"; exit 0; }
+          TOGGLEDARK_HOP=$2 toggledark "$1" && echo "toggledark: set $1 mode on devvm '\''$0'\''"
+        ' "$vm" "$TARGET" "$((TOGGLEDARK_HOP + 1))" 2>/dev/null; then :; else
+        echo "toggledark: could not set $TARGET mode on devvm '$vm' (unreachable or failed)" >&2
+      fi
+    ) &
+  done
+  wait
 fi
