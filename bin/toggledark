@@ -198,7 +198,7 @@ PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"
 if [ -z "$TOGGLEDARK_NO_PROPAGATE" ] && [ "$TOGGLEDARK_HOP" -lt 3 ] &&
   command -v devvm >/dev/null 2>&1; then
   # --local (devvm >= v0.1.13) skips the hub dial; older devvm gets the full listing.
-  rows=$(devvm status --plain --local 2>/dev/null || devvm status --plain 2>/dev/null) ||
+  rows=$(devvm status --plain --local </dev/null 2>/dev/null || devvm status --plain </dev/null 2>/dev/null) ||
     echo "toggledark: 'devvm status --plain' failed, not propagating" >&2
   machines=$(printf '%s\n' "$rows" |
     awk -F '\t' '$2 != "hub" && ($3 == "running" || $3 == "reachable") { print $1 }')
@@ -215,11 +215,20 @@ if [ -z "$TOGGLEDARK_NO_PROPAGATE" ] && [ "$TOGGLEDARK_HOP" -lt 3 ] &&
     # so. $0 is the machine name (for the message), $1 the target mode, $2 the
     # hop count for the guest's own fan-out. Anything the guest prints on
     # stderr is noise from a half-working host, so only our own lines show.
+    #
+    # devvm must NOT see a terminal: when its stdout is a tty it probes the
+    # terminal (OSC 11 colour query + a cursor-position request, via lipgloss/
+    # termenv) even for exec/status. Several at once steal each other's
+    # replies, each then waits out a timeout, and the leftovers land in the
+    # shell as typed garbage. So capture stdout and print it ourselves, and
+    # give it no stdin to read from the terminal either.
     (
-      if $BOUND devvm exec "$vm" sh -c '
+      if out=$($BOUND devvm exec "$vm" sh -c '
           command -v toggledark >/dev/null 2>&1 || { echo "toggledark: devvm '\''$0'\'' has no toggledark, skipped"; exit 0; }
           TOGGLEDARK_HOP=$2 toggledark "$1" && echo "toggledark: set $1 mode on devvm '\''$0'\''"
-        ' "$vm" "$TARGET" "$((TOGGLEDARK_HOP + 1))" 2>/dev/null; then :; else
+        ' "$vm" "$TARGET" "$((TOGGLEDARK_HOP + 1))" </dev/null 2>/dev/null); then
+        [ -n "$out" ] && printf '%s\n' "$out"
+      else
         echo "toggledark: could not set $TARGET mode on devvm '$vm' (unreachable or failed)" >&2
       fi
     ) &
