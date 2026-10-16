@@ -65,7 +65,7 @@ end
 parse_export_file ~/.profile
 parse_export_file ~/.local_profile
 
-eval (direnv hook fish)
+direnv hook fish | source
 fzf --fish | source
 
 # SSH Agent on Ubuntu
