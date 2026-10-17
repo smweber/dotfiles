@@ -1,4 +1,0 @@
-# devvm global defaults (tool-managed; edit freely).
-# These seed unset `create` fields: flag > this file > built-in default.
-
-bootstrap_hook = "url:https://raw.githubusercontent.com/smweber/dotfiles/master/bootstrap.sh --profile agent-vm --yes"

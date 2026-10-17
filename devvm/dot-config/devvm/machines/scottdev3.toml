@@ -1,7 +1,0 @@
-# devvm machine config for "scottdev3" (tool-managed; edit freely)
-
-backend = "remote-unmanaged"
-ssh_host = "scottdev3"
-ssh_port = 22
-mosh_server = "/home/linuxbrew/.linuxbrew/bin/mosh-server"
-ports = ["3000", "3001", "3002", "3003", "8080", "9222", "4000", "3100", "5173", "3210"]

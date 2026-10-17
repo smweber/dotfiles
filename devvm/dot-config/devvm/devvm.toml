@@ -1,0 +1,81 @@
+# ~/.config/devvm/devvm.toml — one file, shared across hosts through dotfiles
+# (stow --dotfiles: devvm/dot-config/devvm/devvm.toml). Hand-edited; devvm
+# writes it only through `devvm config add/rm`.
+#
+# What is NOT here: smol VMs (discovered from `smolvm machine ls`) and
+# Hetzner servers (discovered from the API). Only remote boxes and hubs
+# need an entry. Per-host state (ports, caches, the Hetzner token) lives in
+# ~/.local/state/devvm.
+
+# ----------------------------------------------------------------------
+# Templates: how `create` and `setup` shape a box. Unset fields fall back
+# to [templates.default]. Sizes are create-time only and never stored.
+# ----------------------------------------------------------------------
+
+[templates.default]
+user = "dev"                     # login user devvm creates/uses on managed boxes
+hook = "url:https://raw.githubusercontent.com/smweber/dotfiles/master/bootstrap.sh --profile agent-vm --yes"
+memory = 4096                    # smol, MiB
+server_type = "cx23"             # hetzner
+
+[templates.personal]             # devvm create personal --template personal
+memory = 6144
+repos = [
+  "smweber/gleam_webstack", "smweber/deploy_webstack", "smweber/recipe2",
+  "smweber/devvm", "smweber/my-deployments", "smweber/baseball",
+  "smweber/travel", "smweber/projects",
+]
+ports = ["3000"]                 # seeds this host's saved forwards at setup
+
+[templates.staging]              # devvm setup anytime-staging-1 --template staging
+repos = ["Anytime-Automation-Labs-Inc/anytime-staging-workspace"]
+authorized_keys_github = ["smweber"]
+harden = true
+fail2ban = true
+
+# ----------------------------------------------------------------------
+# Providers: `devvm create NAME --backend hetzner` makes a server here.
+# The API token is per host: `devvm providers token hetzner` (0600 file in
+# ~/.local/state/devvm/providers/), or HCLOUD_TOKEN. Use a project that
+# holds nothing but devvm boxes.
+# ----------------------------------------------------------------------
+
+[providers.hetzner]
+location = "nbg1"
+image = "ubuntu-24.04"
+ssh_key_file = "~/.ssh/id_ed25519.pub"   # uploaded once per key as devvm-<hash>
+
+# ----------------------------------------------------------------------
+# Remote boxes and hubs. `managed = true` means devvm shapes the box
+# (setup, prereqs, hardening); default false = adopted, devvm touches only
+# ~/.ssh. `host` is host[:port] or an ssh alias; `user` unset lets
+# ~/.ssh/config decide.
+# ----------------------------------------------------------------------
+
+[machines.anytime-staging-1]     # work box, shaped by devvm
+backend = "remote"
+managed = true
+host = "anytime-staging-1"       # ssh alias
+user = "dev"
+
+[machines.scottdev3]             # adopted: devvm touches only ~/.ssh
+backend = "remote"
+host = "scottdev3"
+mosh_server = "/home/linuxbrew/.linuxbrew/bin/mosh-server"
+
+# --- test infrastructure (delete if a host should not see them) ---------
+
+[machines.tp]                    # ThinkPad hub (real smolvm, LAN only)
+backend = "hub"
+host = "192.168.1.196"
+user = "devvmtest"
+
+[machines.cloud]                 # Hetzner CX23 test box, shaped by devvm
+backend = "remote"
+managed = true
+host = "2.29.47.196"
+
+[machines.h]                     # the same box as a hub (fake smolvm)
+backend = "hub"
+host = "2.29.47.196"
+user = "dev"
