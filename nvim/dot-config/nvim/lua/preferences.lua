@@ -49,6 +49,14 @@ vim.opt.splitbelow = true
 vim.opt.splitright = true
 
 -- Clipboard
+-- Claude Code's background (daemon-hosted) sessions strip $TMUX from their
+-- environment, so an nvim spawned via ctrl-g can't auto-detect the tmux
+-- clipboard provider. When $TMUX is missing but a tmux server answers on the
+-- default socket, force the tmux provider explicitly.
+if vim.env.TMUX == nil and vim.fn.executable('tmux') == 1
+   and vim.fn.system('tmux display-message -p ok 2>/dev/null'):match('ok') then
+  vim.g.clipboard = 'tmux'
+end
 vim.opt.clipboard:append('unnamedplus')  -- Yank and copy with system clipboard
 
 -- Filetype-specific settings
