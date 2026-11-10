@@ -136,37 +136,4 @@ return {
 
   -- Writing
   'junegunn/goyo.vim',
-
-  -- AI
-  {
-    "Exafunction/windsurf.nvim",
-    -- The Windsurf/Codeium language server has no ARM Linux build; on that
-    -- platform the plugin errors repeatedly instead of failing gracefully, so
-    -- skip it entirely there (lazy.nvim omits plugins whose `enabled` is false).
-    enabled = function()
-      local u = vim.loop.os_uname()
-      local arm_linux = u.sysname == "Linux"
-        and (u.machine == "aarch64" or u.machine:find("^arm") ~= nil)
-      return not arm_linux
-    end,
-    dependencies = {
-      "nvim-lua/plenary.nvim",
-      "hrsh7th/nvim-cmp",
-    },
-    config = function()
-      require("codeium").setup({
-        enable_cmp_source = false,
-        virtual_text = {
-          enabled = true,
-          map_keys = true,
-          key_bindings = {
-            accept = "<C-y>",  -- Ctrl-Y to accept suggestions
-            next = "<M-]>",    -- Alt-] for next suggestion
-            prev = "<M-[>",    -- Alt-[ for previous suggestion
-            clear = "<C-]>",   -- Ctrl-] to dismiss
-          }
-        }
-      })
-    end
-  },
 }
