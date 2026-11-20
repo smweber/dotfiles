@@ -19,20 +19,27 @@ memory = 4096                    # smol, MiB; hetzner sizing is server_type
                                  # (built-in default cx23; set it in a template
                                  # or with --server-type)
 
-[templates.personal]             # devvm create personal --template personal
-memory = 6144
-repos = [
-  "smweber/gleam_webstack", "smweber/deploy_webstack", "smweber/recipe2",
-  "smweber/devvm", "smweber/my-deployments", "smweber/baseball",
-  "smweber/travel", "smweber/projects",
-]
-ports = ["3000"]                 # seeds this host's saved forwards at setup (was the laptop's one saved forward)
-
-[templates.anytime-staging]      # devvm setup anytime-staging-1 --template anytime-staging
-repos = ["Anytime-Automation-Labs-Inc/anytime-staging-workspace"]
+[templates.niiyama]
 authorized_keys_github = ["smweber"]
 harden = true
 fail2ban = true
+location = "hel1"
+server_type = "cpx22" # Helsinki, 2CPU 4GB €16.49
+memory = 4096
+repos = [
+  "smweber/gleam_webstack", "smweber/deploy_webstack", "smweber/recipe2",
+  "smweber/devvm", "smweber/my-deployments", "smweber/baseball",
+  "smweber/travel", "smweber/projects", "smweber/mathgames",
+]
+
+[templates.anytime]
+authorized_keys_github = ["smweber"]
+harden = true
+fail2ban = true
+location = "hel1"
+server_type = "cpx32" # Helsinki, 4CPU 8GB €29.99
+memory = 6144
+repos = ["Anytime-Automation-Labs-Inc/anytime-stack-workspace"]
 
 # ----------------------------------------------------------------------
 # Providers: `devvm create NAME --backend hetzner` makes a server here.
@@ -42,7 +49,8 @@ fail2ban = true
 # ----------------------------------------------------------------------
 
 [providers.hetzner]
-location = "nbg1"
+#location = "hel1"
+#location = "nbg1"
 image = "ubuntu-24.04"
 ssh_key_file = "~/.ssh/id_ed25519.pub"   # uploaded once per key as devvm-<hash>
 
