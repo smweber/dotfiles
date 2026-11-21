@@ -13,7 +13,6 @@
 # ----------------------------------------------------------------------
 
 [templates.default]
-user = "dev"                     # login user devvm creates/uses on managed boxes
 hook = "url:https://raw.githubusercontent.com/smweber/dotfiles/master/bootstrap.sh --profile agent-vm --yes"
 memory = 4096                    # smol, MiB; hetzner sizing is server_type
                                  # (built-in default cx23; set it in a template
@@ -55,19 +54,20 @@ image = "ubuntu-24.04"
 ssh_key_file = "~/.ssh/id_ed25519.pub"   # uploaded once per key as devvm-<hash>
 
 # ----------------------------------------------------------------------
-# Remote boxes and hubs. `managed = true` means devvm shapes the box
-# (setup, prereqs, hardening); default false = adopted, devvm touches only
-# ~/.ssh. `host` is host[:port] or an ssh alias; `user` unset lets
-# ~/.ssh/config decide.
+# Remote boxes and hubs: devvm connects to them and never shapes them. It
+# writes nothing there beyond ~/.ssh, except its agent in ~/.local/bin on an
+# entry with `agent = true` (the browser bridge). `host` is host[:port] or
+# an ssh alias; `user` unset lets ~/.ssh/config decide.
 # ----------------------------------------------------------------------
 
-[machines.anytime-staging-1]     # work box, shaped by devvm
+[machines.anytime-staging-1]     # work box
 backend = "remote"
-managed = true
+agent = true
 host = "anytime-staging-1"       # ssh alias
 user = "dev"
 
-[machines.scottdev3]             # adopted: devvm touches only ~/.ssh
+[machines.scottdev3]
 backend = "remote"
+agent = true
 host = "scottdev3"
 mosh_server = "/home/linuxbrew/.linuxbrew/bin/mosh-server"
