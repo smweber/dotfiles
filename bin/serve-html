@@ -1,0 +1,228 @@
+#!/bin/sh
+""":"
+# A shell launcher lets us explain a missing uv before Python starts.
+if ! command -v uv >/dev/null 2>&1 || ! uv --version >/dev/null 2>&1; then
+    printf '%s\n' 'serve-html requires a working uv command on PATH.' >&2
+    printf '%s\n' 'Install/activate it with: mise use -g uv' >&2
+    printf '%s\n' 'Or with Homebrew: brew install uv' >&2
+    exit 127
+fi
+exec uv run --script "$0" "$@"
+":"""
+# /// script
+# requires-python = ">=3.10"
+# dependencies = ["markdown-it-py>=3,<5", "mdit-py-plugins>=0.4,<1"]
+# ///
+# Serve piped HTML or Markdown from memory on localhost (Linux/macOS).
+import argparse
+import http.server
+from html.parser import HTMLParser
+import math
+import os
+import re
+import shlex
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from urllib.parse import urlsplit
+
+
+STYLE = """
+:root { color-scheme: light dark; --bg: #fff; --fg: #24292f;
+  --muted: #57606a; --border: #d0d7de; --panel: #f6f8fa; --link: #0969da; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #9da7b3;
+    --border: #30363d; --panel: #161b22; --link: #79c0ff; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 17px/1.7 system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  overflow-wrap: break-word; }
+main { max-width: 860px; margin: 0 auto; padding: 48px 28px 96px; }
+h1, h2, h3, h4, h5, h6 { line-height: 1.25; margin: 1.6em 0 .6em; font-weight: 650; }
+h1 { font-size: 2.2em; } h2 { font-size: 1.6em; }
+h1, h2 { padding-bottom: .3em; border-bottom: 1px solid var(--border); }
+main > :first-child { margin-top: 0; }
+p, ul, ol, blockquote, pre, table { margin: 0 0 1.2em; }
+li + li { margin-top: .3em; } li > ul, li > ol { margin-bottom: 0; }
+.task-list-item { list-style: none; }
+.task-list-item-checkbox { margin: 0 .5em 0 -1.4em; accent-color: var(--link); }
+a { color: var(--link); text-underline-offset: .18em; }
+a:hover { text-decoration-thickness: 2px; }
+code, pre, kbd { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+code { font-size: .88em; background: var(--panel); padding: .15em .35em; border-radius: 4px; }
+pre { padding: 18px 20px; overflow-x: auto; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 8px; line-height: 1.55; }
+pre code { padding: 0; background: none; border-radius: 0; }
+blockquote { margin-left: 0; padding: .2em 1.2em; color: var(--muted);
+  border-left: 4px solid var(--border); }
+blockquote > :last-child { margin-bottom: 0; }
+table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+th, td { padding: .55em .9em; border: 1px solid var(--border); text-align: left; }
+th, tr:nth-child(even) { background: var(--panel); }
+img, video { max-width: 100%; height: auto; }
+hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+kbd { padding: .1em .4em; border: 1px solid var(--border); border-radius: 4px; }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; }
+@media (max-width: 600px) { main { padding: 24px 18px 56px; } body { font-size: 16px; } }
+@media print { :root { --bg: white; --fg: black; --muted: #444; --panel: #f5f5f5; }
+  main { max-width: none; padding: 0; } pre { white-space: pre-wrap; } }
+"""
+
+
+def looks_like_html(content):
+    """Recognize leading HTML markup; ambiguous/plain text defaults to Markdown."""
+    text = content.decode('utf-8-sig', errors='replace')
+    # Comments commonly precede either format and aren't a useful signal.
+    text = re.sub(r'\A(?:\s|<!--[\s\S]*?-->)*', '', text)
+    tags = (
+        'html head body title meta link style script main article section nav '
+        'header footer aside div p h1 h2 h3 h4 h5 h6 ul ol li dl dt dd '
+        'table thead tbody tfoot tr th td caption colgroup col blockquote pre '
+        'hr br img picture figure figcaption video audio source iframe '
+        'details summary form input button label select textarea span a '
+        'strong em b i u s del ins code kbd samp small sub sup mark time'
+    )
+    return bool(re.match(
+        r'(?:<!doctype\s+html\b|<(?:' + '|'.join(tags.split()) + r')(?=[\s/>]))',
+        text, re.IGNORECASE))
+
+
+def styled_page(content):
+    class DocumentDetector(HTMLParser):
+        complete = False
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ('html', 'head', 'body'):
+                self.complete = True
+
+        def handle_decl(self, decl):
+            if decl.lower().startswith('doctype html'):
+                self.complete = True
+
+    detector = DocumentDetector()
+    detector.feed(content.decode('utf-8', errors='replace'))
+    if detector.complete:
+        return content
+    prefix = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+              '<meta name="viewport" content="width=device-width, initial-scale=1">'
+              '<link rel="icon" href="data:,">'
+              '<title>Markdown preview</title><style>' + STYLE +
+              '</style></head><body><main>')
+    return prefix.encode('utf-8') + content + b'</main></body></html>'
+
+
+def main():
+    parser = argparse.ArgumentParser(description=
+        'Serve piped HTML or Markdown once, from memory, on localhost.', epilog=
+        'Example: cat README.md | serve-html --open. '
+        'Detects leading HTML markup; otherwise renders Markdown. '
+        'Use --markdown or --html to override detection. '
+        'Exits after the first successful page GET or the timeout; reload requires a new run. '
+        'Set BROWSER to your browser command; arguments and a %s URL placeholder are supported.')
+    parser.add_argument('--open', action='store_true', help='open with $BROWSER')
+    formats = parser.add_mutually_exclusive_group()
+    formats.add_argument('--markdown', dest='format', action='store_const', const='markdown',
+                         help='force Markdown rendering, including tables and task lists')
+    formats.add_argument('--html', dest='format', action='store_const', const='html',
+                         help='force HTML input without Markdown rendering')
+    parser.add_argument('--plain', action='store_true', help='serve input without the styled wrapper')
+    parser.add_argument('--port', type=int, default=0, help='port (default: choose a free port)')
+    parser.add_argument('--ttl', type=float, default=300, help='maximum lifetime in seconds (default: 300)')
+    args = parser.parse_args()
+    if not math.isfinite(args.ttl) or args.ttl <= 0:
+        parser.error('--ttl must be finite and positive')
+    if sys.stdin.isatty():
+        parser.error('pipe HTML or Markdown into this command')
+    html = sys.stdin.buffer.read()
+    if not html.strip():
+        parser.error('received empty input; try: cat README.md | serve-html --open')
+    input_format = args.format or ('html' if looks_like_html(html) else 'markdown')
+    if input_format == 'markdown':
+        from markdown_it import MarkdownIt
+        from mdit_py_plugins.tasklists import tasklists_plugin
+        renderer = (MarkdownIt('commonmark').enable('table').enable('strikethrough')
+                    .use(tasklists_plugin))
+        try:
+            html = renderer.render(html.decode('utf-8-sig')).encode('utf-8')
+        except UnicodeDecodeError:
+            parser.error('Markdown input must be UTF-8')
+    if not args.plain:
+        html = styled_page(html)
+    opener = None
+    if args.open:
+        try:
+            opener = shlex.split(os.environ.get('BROWSER', ''))
+        except ValueError as error:
+            parser.error(f'invalid BROWSER command: {error}')
+        if not opener:
+            parser.error('--open requires BROWSER to be set to a browser command')
+        if not shutil.which(opener[0]):
+            parser.error(f'BROWSER command not found: {opener[0]}')
+
+    served = threading.Event()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def send_page_headers(self):
+            if urlsplit(self.path).path != '/':
+                self.send_error(404)
+                return False
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Content-Length', str(len(html)))
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            return True
+
+        def do_HEAD(self):
+            self.send_page_headers()
+
+        def do_GET(self):
+            if not self.send_page_headers():
+                return
+            try:
+                self.wfile.write(html)
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            else:
+                served.set()
+
+        def log_message(self, *args):
+            pass
+
+    try:
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', args.port), Handler)
+    except (OSError, OverflowError) as error:
+        parser.error(str(error))
+    url = f'http://localhost:{server.server_port}/'
+    sys.stdout.flush()
+    sys.stderr.flush()
+    pid = os.fork()
+    if pid == 0:
+        os.setsid()
+        with open(os.devnull, 'r+b', buffering=0) as null:
+            for fd in (0, 1, 2):
+                os.dup2(null.fileno(), fd)
+        deadline = time.monotonic() + args.ttl
+        try:
+            while not served.is_set() and time.monotonic() < deadline:
+                server.timeout = min(.1, max(0, deadline - time.monotonic()))
+                server.handle_request()
+        finally:
+            server.server_close()
+            os._exit(0)
+    server.server_close()
+    print(url, flush=True)
+    print(f'Serving {len(html)} bytes once (max {args.ttl:g}s); stop with: kill {pid}', file=sys.stderr)
+    if opener:
+        command = ([arg.replace('%s', url) for arg in opener]
+                   if any('%s' in arg for arg in opener) else opener + [url])
+        return subprocess.call(command, stdout=sys.stderr)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
