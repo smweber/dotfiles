@@ -1,3 +1,7 @@
+# LC_ALL overrides every locale setting and gets forwarded by ssh (SendEnv LC_*),
+# causing setlocale warnings on servers lacking that locale. LANG is enough.
+set -e LC_ALL
+
 fish_vi_key_bindings
 set -g theme_display_vi yes
 #set -g theme_nerd_fonts yes
