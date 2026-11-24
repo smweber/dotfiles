@@ -14,13 +14,13 @@
 
 [templates.default]
 hook = "url:https://raw.githubusercontent.com/smweber/dotfiles/master/bootstrap.sh --profile agent-vm --yes"
-memory = 4096                    # smol, MiB; hetzner sizing is server_type
-                                 # (built-in default cx23; set it in a template
-                                 # or with --server-type)
+memory = 4096                    # smol, MiB; hetzner sizing is server_type:
+                                 # `devvm providers types hetzner` lists types,
+                                 # prices and what is sold out where
+authorized_keys_github = ["smweber"]  # every server gets my GitHub keys
+                                 # (harden is on by default; harden = false opts out)
 
 [templates.niiyama]
-authorized_keys_github = ["smweber"]
-harden = true
 fail2ban = true
 location = "hel1"
 server_type = "cpx22" # Helsinki, 2CPU 4GB €16.49
@@ -32,8 +32,6 @@ repos = [
 ]
 
 [templates.anytime]
-authorized_keys_github = ["smweber"]
-harden = true
 fail2ban = true
 location = "hel1"
 server_type = "cpx32" # Helsinki, 4CPU 8GB €29.99
