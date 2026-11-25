@@ -39,10 +39,10 @@ memory = 6144
 repos = ["Anytime-Automation-Labs-Inc/anytime-stack-workspace"]
 
 # devvm's starter hook, to try what a new user gets: `devvm create NAME -t
-# minimal`. hook.sh is the script beside this file (a copy of the starter
-# create's form writes): packages, a tmux status line, a few shell lines.
+# minimal`. "starter" is the script built into devvm (packages, a tmux
+# status line, a few shell lines); needs devvm v0.4.1 or newer.
 [templates.minimal]
-hook = "file:hook.sh"
+hook = "starter"
 
 # ----------------------------------------------------------------------
 # Providers: `devvm create NAME --backend hetzner` makes a server here.
